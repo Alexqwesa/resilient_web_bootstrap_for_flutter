@@ -1,0 +1,148 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Cleaning application cache…</title>
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1"
+    />
+    <style>
+      body {
+        margin: 0;
+        padding: 24px;
+        font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
+        color: #222;
+      }
+
+      code {
+        background: #f1f5f9;
+        border-radius: 4px;
+        padding: 1px 4px;
+      }
+
+      #details {
+        margin-top: 12px;
+        white-space: pre-wrap;
+        font-size: 12px;
+        color: #475569;
+      }
+    </style>
+  </head>
+  <body>
+    <h2>Cleaning application cache…</h2>
+
+    <p>
+      Cleaning loader state and old browser caches. You will be redirected to
+      the main page shortly. If nothing happens,
+      <a id="manual-link" href="index.html">click here</a>.
+    </p>
+
+    <p>
+      This does not delete application data stored in IndexedDB.
+    </p>
+
+    <div id="details"></div>
+
+    <script>
+      const details = document.getElementById("details");
+
+      function log(message) {
+        console.log(message);
+        details.textContent += `${message}\n`;
+      }
+
+      function shouldRemoveSharedPreferencesKey(key) {
+        return key === "flutter." || key.startsWith("flutter.");
+      }
+
+      function removeKnownLoaderStorageKeys() {
+        const exactKeys = [
+          // Current / old loader state.
+          "flutter.lastGoodManifest",
+        ];
+
+        for (const key of exactKeys) {
+          try {
+            localStorage.removeItem(key);
+            sessionStorage.removeItem(key);
+            log(`Removed ${key}`);
+          } catch (e) {
+            console.error("Storage key remove failed", key, e);
+          }
+        }
+
+        // Remove future versioned last-good keys, but do not wipe unrelated app data.
+        try {
+          for (let i = localStorage.length - 1; i >= 0; i -= 1) {
+            const key = localStorage.key(i);
+            if (
+              key &&
+              (key === "flutter.lastGoodManifest" ||
+                key.startsWith("flutter.lastGoodManifest.") ||
+                shouldRemoveSharedPreferencesKey(key))
+            ) {
+            localStorage.removeItem(key);
+            log(`Removed localStorage ${key}`);
+            }
+          }
+        } catch (e) {
+          console.error("localStorage cleanup failed", e);
+        }
+      }
+
+      function makeReturnUrl() {
+        const url = new URL("index.html", window.location.href);
+        url.searchParams.set("cache_bust", String(Date.now()));
+        url.searchParams.set("loader_repair", "1");
+        return url.href;
+      }
+
+      // TEMPORARY: force-unregister old service workers and clear Cache Storage.
+      // Keep this even if the current app does not use a service worker, because
+      // older deployments may have registered one.
+      (async () => {
+        try {
+          removeKnownLoaderStorageKeys();
+
+          if ("serviceWorker" in navigator) {
+            const regs = await navigator.serviceWorker.getRegistrations();
+            for (const r of regs) {
+              try {
+                await r.unregister();
+                log("Unregistered service worker");
+              } catch (e) {
+                console.error("SW unregister failed", e);
+              }
+            }
+          }
+
+          if (window.caches) {
+            const keys = await caches.keys();
+            for (const key of keys) {
+              try {
+                await caches.delete(key);
+                log(`Deleted Cache Storage: ${key}`);
+              } catch (e) {
+                console.error("Cache delete failed", e);
+              }
+            }
+          }
+
+          // Note: browsers do not expose a safe API to delete normal HTTP cache
+          // entries for immutable /version/... files. The important repair here
+          // is removing the loader's last-good manifest so the next boot does
+          // not intentionally load an old version folder.
+        } catch (e) {
+          console.error("Cleanup error", e);
+          log(`Cleanup error: ${e && (e.message || e)}`);
+        } finally {
+<!--          const target = makeReturnUrl();-->
+<!--          document.getElementById("manual-link").href = target;-->
+<!--          log(`Redirecting to ${target}`);-->
+          window.location.replace('/');
+        }
+      })();
+    </script>
+  </body>
+</html>

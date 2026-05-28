@@ -1,0 +1,303 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <!--
+
+  -->
+  <base href="$FLUTTER_BASE_HREF">
+  <script>
+    // This page can be opened either from:
+    //   /index.html  - sideload latest
+    //   /version/<build>/index.html - no updates
+    (() => {
+      const defaultBuildVersion = '__DEFAULT_BUILD_VERSION__';
+
+      function normalizeDir(path) {
+        if (!path) {
+          return '/';
+        }
+        return path.endsWith('/') ? path : `${path}/`;
+      }
+
+      function detectVersionBase() {
+        const path = window.location.pathname || '/';
+        const match = path.match(/^(.*\/version\/[^/?#]+)(?:\/|$)/);
+        return match ? normalizeDir(match[1]) : null;
+      }
+
+      const versionBase = detectVersionBase();
+      const isDebugDevServer = defaultBuildVersion.startsWith('__DEFAULT_BUILD_');
+
+      // If the page itself is opened from /version/<build>/, load assets from
+      // that same version directory and make Flutter's base href that directory.
+      // Otherwise this is root app mode: keep Flutter routes rooted at /, but
+      // always load immutable build files from /version/<defaultBuildVersion>/.
+      const appBase = versionBase || '/';
+      // In Flutter web debug (`flutter run -d chrome`), `__DEFAULT_BUILD_VERSION__` is not
+      // replaced and the dev server doesn't serve `/version/<build>/...` assets.
+      // Fall back to the standard debug boot flow in that case.
+      const assetBase = versionBase
+        ? normalizeDir(versionBase)
+        : (isDebugDevServer ? '/' : normalizeDir(`/version/${defaultBuildVersion}`));
+
+      const base = document.querySelector('base') || document.createElement('base');
+      base.setAttribute('href', appBase);
+      if (!base.parentNode) {
+        document.head.prepend(base);
+      }
+
+      window.__resilientAppBase = appBase;
+      window.__resilientAssetBase = assetBase;
+      window.__resilientVersionPinned = !!versionBase;
+      window.__resilientDebugBoot = isDebugDevServer && !versionBase;
+      window.resilientAssetUrl = function(relativePath) {
+        const cleanPath = String(relativePath || '').replace(/^\/+/, '');
+        return new URL(cleanPath, window.location.origin + assetBase).toString();
+      };
+
+      window.resilientLoadScript = function(relativePath) {
+        const script = document.createElement('script');
+        script.src = window.resilientAssetUrl(relativePath);
+        script.async = false;
+        document.body.appendChild(script);
+      };
+
+      window.resilientAddLink = function(rel, href, attrs) {
+        const link = document.createElement('link');
+        link.rel = rel;
+        link.href = window.resilientAssetUrl(href);
+        for (const [key, value] of Object.entries(attrs || {})) {
+          link.setAttribute(key, value);
+        }
+        document.head.appendChild(link);
+      };
+
+      window.resilientAddLink('apple-touch-icon', 'icons/Icon-192.png');
+      window.resilientAddLink('icon', 'favicon.png', { type: 'image/png' });
+      window.resilientAddLink('manifest', 'manifest.json');
+    })();
+  </script>
+
+  <meta charset="UTF-8">
+  <meta content="IE=Edge" http-equiv="X-UA-Compatible">
+  <meta name="description" content="__RESILIENT_APP_DESCRIPTION__">
+
+  <!-- iOS meta tags & icons -->
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black">
+  <meta name="apple-mobile-web-app-title" content="__RESILIENT_APP_TITLE__">
+
+  <!-- Favicon -->
+
+  <title>__RESILIENT_APP_TITLE__</title>
+  <script>
+    // TEMPORARY: clear old Flutter service workers and caches once.
+    (async () => {
+      try {
+        if (window.sessionStorage.getItem("flutter_sw_cleanup_done") === "1") {
+          return;
+        }
+        if ("serviceWorker" in navigator) {
+          const regs = await navigator.serviceWorker.getRegistrations();
+          for (const reg of regs) {
+            try {
+              await reg.unregister();
+            } catch (e) {
+              console.error("SW unregister failed", e);
+            }
+          }
+        }
+
+        if (window.caches) {
+          const keys = await caches.keys();
+          for (const key of keys) {
+            try {
+              await caches.delete(key);
+            } catch (e) {
+              console.error("Cache delete failed", e);
+            }
+          }
+        }
+      } catch (e) {
+        console.error("Cleanup error", e);
+      } finally {
+        window.sessionStorage.setItem("flutter_sw_cleanup_done", "1");
+      }
+    })();
+  </script>
+  <script>
+    // Accept the bootstrap payload from the parent page after the iframe loads.
+    // The Dart bootstrap bridge consumes this without a reload.
+      (() => {
+      const messageType = '__RESILIENT_TOKEN_MESSAGE_TYPE__';
+      const queueKey = '__resilientBootstrapQueue';
+
+      function referrerOrigin() {
+        try {
+          return document.referrer ? new URL(document.referrer).origin : null;
+        } catch (error) {
+          return null;
+        }
+      }
+
+      function enqueue(payload) {
+        const serialized = JSON.stringify(payload);
+        const existing = sessionStorage.getItem(queueKey);
+        const queue = existing ? JSON.parse(existing) : [];
+        queue.push(serialized);
+        sessionStorage.setItem(queueKey, JSON.stringify(queue));
+      }
+
+      window.addEventListener('message', (event) => {
+        const data = event.data;
+        if (!data || data.type !== messageType) {
+          return;
+        }
+
+        if (event.source !== window.parent) {
+          return;
+        }
+
+        const allowedOrigin = referrerOrigin();
+        if (allowedOrigin && event.origin !== allowedOrigin) {
+          return;
+        }
+
+        const token = typeof data.token === 'string' ? data.token.trim() : '';
+        const anon = data.anon === true;
+
+        if (!anon && !token) {
+          return;
+        }
+
+        enqueue({
+          type: data.type,
+          token: token,
+          anon: anon,
+        });
+      });
+    })();
+  </script>
+
+</head>
+<body>
+  <style>
+        body, html {
+            margin: 0;
+            padding: 0;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+            background-color: #0e1514;
+            color: #ffffff;
+            font-family: 'Courier New', Courier, monospace;
+        }
+
+        .loader-container {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            position: relative;
+        }
+
+      .kt-text {
+          font-size: 10vw; /* Size relative to viewport width */
+          font-weight: bold;
+          color: #ffffff;
+          position: relative;
+          z-index: 2;
+      }
+
+      .bracket {
+          position: absolute;
+          font-size: 12vw; /* Adjusted relative to viewport width */
+          color: #888888;
+          animation: pulseOut 1.5s infinite ease-in-out;
+          opacity: 0;
+      }
+
+
+        .bracket.left {
+            left: -8vw;
+        }
+
+        .bracket.right {
+            right: -8vw;
+        }
+
+        @keyframes pulseOut {
+            0% {
+                transform: scale(1);
+                opacity: 0.5;
+            }
+            50% {
+                transform: scale(1.3);
+                opacity: 0.1;
+            }
+            100% {
+                transform: scale(1.6);
+                opacity: 0;
+            }
+        }
+
+
+
+  #ck-preloader {
+    position: fixed; inset: 0; background: #0b0b0f; color: #eee;
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    z-index: 99999; font: 14px/1.4 system-ui, -apple-system, Segoe UI, Roboto, Arial;
+  }
+  #ck-title { margin-bottom: 12px; opacity: .9; }
+  #ck-bar {
+    width: min(420px, 80vw); height: 8px; background: #222; border-radius: 999px; overflow: hidden;
+    box-shadow: inset 0 0 0 1px #333;
+  }
+  #ck-fill { height: 100%; width: 0%; background: #4da3ff; transition: width .15s linear; }
+  #ck-sub { margin-top: 10px; font-size: 12px; color:#aaa; }
+  .ck-hide { display: none !important; }
+
+  </style>
+
+<script>
+  // Root sideload: optional hardUpdate preflight (see app_update.js for cache discard + background reload).
+  (async function resilientBoot() {
+    if (!window.__resilientDebugBoot && !window.__resilientVersionPinned) {
+      try {
+        const res = await fetch("/latest.json", { cache: "no-store" });
+        if (res.ok) {
+          const latest = await res.json();
+          if (latest && latest.hardUpdate === true) {
+            localStorage.removeItem("flutter.lastGoodManifest");
+            localStorage.removeItem("flutter.nextManifest");
+            if (latest.base) {
+              const base = latest.base.endsWith("/") ? latest.base : `${latest.base}/`;
+              window.__resilientAssetBase = base;
+              window.resilientAssetUrl = function (relativePath) {
+                const clean = String(relativePath || "").replace(/^\/+/, "");
+                return new URL(clean, window.location.origin + base).toString();
+              };
+            }
+          }
+        }
+      } catch (e) {
+        console.warn("hardUpdate preflight failed", e);
+      }
+    }
+
+    if (window.__resilientDebugBoot) {
+      const s = document.createElement("script");
+      s.src = "main.dart.js";
+      s.defer = true;
+      document.body.appendChild(s);
+      return;
+    }
+
+    window.resilientLoadScript("boot_download_helpers.js");
+    window.resilientLoadScript("app_update.js");
+  })();
+</script>
+
+
+</body>
+</html>
