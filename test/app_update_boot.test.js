@@ -304,6 +304,7 @@ function makeManifest(version, filePrefix) {
 
 function makeHarness({
   latestManifests,
+  bootManifest,
   savedManifest,
   initialLastGoodManifest,
   nextManifest,
@@ -311,11 +312,13 @@ function makeHarness({
   runBackgroundTimers = false,
   versionPinned = false,
   pinnedManifest,
+  rootLatestFails = false,
 } = {}) {
   const context = makeEventTarget();
   const blobStore = new Map();
   const downloadCalls = [];
   const manifestCalls = [];
+  let rootManifestCallCount = 0;
   const cleanupCalls = [];
   const reloadCalls = [];
   let timeoutSeq = 0;
@@ -379,15 +382,16 @@ function makeHarness({
       return `https://example.test/version/202605141110/${cleanPath}`;
     };
   }
-  context.URL = {
-    createObjectURL(blob) {
+  context.URL = class TestURL extends URL {
+    static createObjectURL(blob) {
       const url = `blob:test:${blobStore.size + 1}`;
       blobStore.set(url, blob);
       return url;
-    },
-    revokeObjectURL(url) {
+    }
+
+    static revokeObjectURL(url) {
       blobStore.delete(url);
-    },
+    }
   };
   context.localStorage = {
     _map: new Map(),
@@ -429,6 +433,10 @@ function makeHarness({
 
   const { document } = makeDocument(context);
   context.document = document;
+  const defaultBootVersion = versionPinned ? '202605141110' : '202605141110';
+  document.currentScript = {
+    src: `https://example.test/version/${defaultBootVersion}/app_update.js`,
+  };
 
   const bootstrapSource = Buffer.from(
     `
@@ -509,14 +517,33 @@ _flutter.loader.load({
   };
 
   const manifestByCall = latestManifests.slice();
-  const pinnedBootManifest = pinnedManifest || (versionPinned ? latestManifests[0] : null);
+  const embeddedBootManifest = bootManifest || pinnedManifest || latestManifests[0];
+  const pinnedBootManifest = pinnedManifest || (versionPinned ? embeddedBootManifest : null);
   context.fetch = async function fetchMock(url) {
     const urlText = String(url);
+    if (urlText.includes('/version/') && urlText.endsWith('/latest.json')) {
+      manifestCalls.push(urlText);
+      return {
+        ok: true,
+        json: async () => embeddedBootManifest,
+      };
+    }
+
     if (urlText.endsWith('/latest.json')) {
       manifestCalls.push(urlText);
+      if (rootLatestFails) {
+        return {
+          ok: false,
+          status: 503,
+          json: async () => {
+            throw new Error('root latest unavailable');
+          },
+        };
+      }
       const manifest = versionPinned
         ? pinnedBootManifest
-        : manifestByCall[Math.min(manifestCalls.length - 1, manifestByCall.length - 1)];
+        : manifestByCall[Math.min(rootManifestCallCount, manifestByCall.length - 1)];
+      rootManifestCallCount += 1;
       return {
         ok: true,
         json: async () => manifest,
@@ -570,6 +597,27 @@ test('app_update boots through gz bootstrap blob until flutter init', async () =
   assert.equal(harness.context.__RUN_APP_DONE, true);
   assert.equal(harness.context.__FLUTTER_BUILD__, '202605141110');
   assert.equal(harness.downloadCalls[0].endsWith('/version/202605141110/flutter_bootstrap.js.gz'), true);
+});
+
+test('app_update boots embedded version when root latest.json is unavailable', async () => {
+  const embeddedManifest = makeManifest('202605141110', '');
+  const harness = makeHarness({
+    latestManifests: [makeManifest('202605141111', 'new/')],
+    bootManifest: embeddedManifest,
+    rootLatestFails: true,
+  });
+
+  await waitFor(() => harness.context.__RUN_APP_DONE === true);
+
+  assert.equal(
+    harness.manifestCalls.some(url => url.endsWith('/version/202605141110/latest.json')),
+    true,
+  );
+  assert.equal(
+    harness.downloadCalls[0].endsWith('/version/202605141110/flutter_bootstrap.js.gz'),
+    true,
+  );
+  assert.equal(harness.context.__FLUTTER_BUILD__, '202605141110');
 });
 
 test('app_update keeps lastGoodManifest as default while nextManifest is incomplete', async () => {
