@@ -1,9 +1,50 @@
 # resilient_web_bootstrap_for_flutter
 
-A Dart CLI package for adding a hardened Flutter web bootstrap to Flutter projects.
+**Make Flutter Web survive bad networks, stale caches, and risky deploys.**
 
-It installs the web bootstrap files into `web/`, then post-processes `flutter build web`
-output into a versioned deployment layout:
+Flutter Web is usually easy: deploy `index.html`, `flutter_bootstrap.js`, `main.dart.js`, and let the browser load the app.
+
+That works well until one of these happens:
+
+- the user has a slow or unstable connection;
+- a large file like `main.dart.js` or `canvaskit.wasm` stalls halfway;
+- the server is updated while someone is still loading the old app;
+- the browser keeps a mix of old and new cached files;
+- users are told to “press F5 and try again”.
+
+This package adds a hardened boot layer for Flutter Web. It treats your web build as a **versioned release**, not as a loose set of files.
+
+Use it for internal portals, offshore sites, kiosks, iframe apps, operations dashboards, and any Flutter Web app where **“reload and hope” is not acceptable**.
+
+## What You Get
+
+| Feature | What it means |
+|---|---|
+| **Versioned releases** | Every build lives under `/version/<build>/`, so old and new users do not fight over the same files. |
+| **Tiny root entry** | Only `index.html` and `latest.json` stay at the root. They point to the active version. |
+| **Resumable downloads** | Large boot files can continue after a stall instead of starting again from zero. |
+| **Gzip boot files** | Big files such as `main.dart.js` and `canvaskit.wasm` can be transferred much smaller. |
+| **SHA-256 checks** | Downloaded boot files are checked before the loader trusts them. |
+| **Background updates** | The current app keeps running while the next version downloads in the background. |
+| **Hard update mode** | Force old boot state to be ignored when a release must be loaded cleanly. |
+| **Cache repair page** | Give users a safe way to recover from broken browser, service-worker, or loader cache state. |
+| **Dart CLI** | Install web files, generate helper scripts, and package `flutter build web` output automatically. |
+
+## Tradeoffs
+
+| Choice | Why it helps                                                                                           | What you need to know                                                    |
+|---|--------------------------------------------------------------------------------------------------------|--------------------------------------------------------------------------|
+| **Resumable boot files** | Bad connections do not force huge files to restart from zero.                                          | Your server must support byte-range requests for `/version/` files.      |
+| **Gzip transfer** | Boot files are smaller on the wire. For example, standard flutter deploy shrink from 15Mb to just 5Mb. | The browser must decompress the file before running it.                  |
+| **Versioned deploys** | Old sessions and new sessions can both keep working during a deploy.                                   | Cache headers must be configured correctly.                              |
+| **Background sideload** | Users can keep working while the next version downloads.                                               | Use --hard-update to load latest version (like in usuall deploys)        |
+| **Safer boot path** | Progress, retry, resume, and validation are visible and controlled.                                    | On excellent networks, native Flutter loading may start slightly faster. |
+
+## How It Works
+
+The package installs hardened bootstrap files into `web/`.
+
+Then it post-processes `flutter build web` output into a versioned layout:
 
 ```text
 index.html
@@ -15,7 +56,8 @@ version/<build>/
   flutter_bootstrap.js.gz
   main.dart.js
   main.dart.js.gz
-  canvaskit/...
+  canvaskit/
+  assets/
 ```
 
 The loader supports versioned boot assets, resumable gzip downloads, manifest integrity
@@ -92,7 +134,7 @@ app:
   title: "Flutter App"
   description: "Hardened Flutter web app"
   loaderLabel: "Loading"
-  tokenMessageType: "flutter-bootstrap-token"
+  tokenMessageType: "flutter-bootstrap-token" # Useful when deploying in an iframe and passing messages to the app, such as an auth token.
 
 bootstrap:
   versionPath: "/version"
