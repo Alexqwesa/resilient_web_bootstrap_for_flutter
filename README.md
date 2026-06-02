@@ -38,15 +38,38 @@ Install or update the managed `web/` files:
 dart run resilient_web_bootstrap_for_flutter:resilient_bootstrap --project . install
 ```
 
-Build and package the web app:
+This also creates build helper scripts:
+
+- `tool/build_resilient_web.ps1`
+- `tool/build_resilient_web.sh`
+
+Build and package the web app with an auto-generated local timestamp version:
+
+```powershell
+.\tool\build_resilient_web.ps1
+.\tool\build_resilient_web.ps1 --hard-update
+```
+
+```bash
+sh tool/build_resilient_web.sh
+sh tool/build_resilient_web.sh --hard-update
+```
+
+Or run the lower-level commands manually:
 
 ```bash
 flutter build web --release
-dart run resilient_web_bootstrap_for_flutter:resilient_bootstrap --project . package --version 202605281200 --force
+dart run resilient_web_bootstrap_for_flutter:resilient_bootstrap --project . package --force
+dart run resilient_web_bootstrap_for_flutter:resilient_bootstrap --project . package --hard-update --force
 ```
 
 The default packaged output is `build/web_hardened`. Deploy that directory, not the raw
 `build/web` directory.
+
+Promotion should copy `version/<build>/` first and replace root `index.html` and
+`latest.json` last. Configure nginx so root `index.html`, `/`, and `latest.json`
+are not cached by nginx or the browser; immutable caching should only apply under
+`/version/`.
 
 ## Global Usage
 
@@ -55,7 +78,7 @@ For CI images or one-off local use:
 ```bash
 dart pub global activate --source git <repo-url>
 resilient_bootstrap --project . install
-resilient_bootstrap --project . package --version 202605281200 --force
+resilient_bootstrap --project . package --force
 ```
 
 The dev-dependency workflow is preferred because the project records the tool version.
@@ -77,7 +100,8 @@ bootstrap:
   cleanupPage: "cleanup_cache.html"
 ```
 
-Run `install` again after changing this file.
+Run `install` again after changing template fields such as title, description,
+loader label, or token message type. `hardUpdate` affects packaging only.
 
 ## Commands
 
@@ -91,6 +115,19 @@ resilient_bootstrap --project . uninstall [--restore-backup]
 `install` writes only managed bootstrap files and records their hashes in
 `.resilient_web_bootstrap/installed.json`. Existing files are backed up under
 `.resilient_web_bootstrap/backups/<timestamp>/`.
+
+The generated build scripts accept:
+
+```bash
+--hard-update
+--version <id>
+--out <dir>
+--build-dir <dir>
+--profile
+--debug
+```
+
+Any other argument is passed through to `flutter build web`.
 
 `uninstall` removes only files whose current hash still matches the managed hash. Edited
 files are left in place.

@@ -86,7 +86,7 @@ final class ResilientBootstrapCli {
         )
         ..addOption(
           'version',
-          help: 'Build/version id. Defaults to UTC yyyyMMddHHmmss.',
+          help: 'Build/version id. Defaults to local yyyyMMddHHmmss.',
         )
         ..addFlag(
           'hard-update',
@@ -165,7 +165,7 @@ final class InstallCommand extends ProjectCommand {
     final previousState = loadState();
     final nextState = Map<String, String>.from(previousState);
     final backupDir = Directory(
-      p.join(stateDir.path, 'backups', _timestamp(DateTime.now().toUtc())),
+      p.join(stateDir.path, 'backups', _timestamp(DateTime.now())),
     );
     var backedUpAnyFile = false;
 
@@ -196,6 +196,33 @@ final class InstallCommand extends ProjectCommand {
       nextState[relativePath] = desiredHash;
     }
 
+    for (final script in _buildScripts()) {
+      final destination = File(p.join(projectRoot.path, script.relativePath));
+      final desiredHash = sha256Text(script.content);
+
+      if (destination.existsSync()) {
+        final currentHash = sha256File(destination);
+        final previousHash = previousState[script.relativePath];
+        if (!force && previousHash != null && currentHash != previousHash) {
+          throw StateError(
+            '${script.relativePath} was edited since the last install. '
+            'Re-run with --force to overwrite it.',
+          );
+        }
+        if (currentHash != desiredHash) {
+          _copyFile(
+            destination,
+            File(p.join(backupDir.path, script.relativePath)),
+          );
+          backedUpAnyFile = true;
+        }
+      }
+
+      destination.parent.createSync(recursive: true);
+      destination.writeAsStringSync(script.content);
+      nextState[script.relativePath] = desiredHash;
+    }
+
     saveState(nextState);
     stdout.writeln(
       'Installed hardened Flutter web bootstrap into ${webDir.path}',
@@ -210,6 +237,19 @@ final class InstallCommand extends ProjectCommand {
     if (!file.existsSync()) {
       file.writeAsStringSync(config.toYaml());
     }
+  }
+
+  List<_ManagedScript> _buildScripts() {
+    return const [
+      _ManagedScript(
+        relativePath: 'tool/build_resilient_web.ps1',
+        content: _powerShellBuildScript,
+      ),
+      _ManagedScript(
+        relativePath: 'tool/build_resilient_web.sh',
+        content: _shellBuildScript,
+      ),
+    ];
   }
 }
 
@@ -316,7 +356,7 @@ final class PackageCommand extends ProjectCommand {
     ensureFlutterProject();
     final config = loadConfig();
     final version =
-        (results['version'] as String?) ?? _timestamp(DateTime.now().toUtc());
+        (results['version'] as String?) ?? _timestamp(DateTime.now());
     final buildDir = Directory(_projectPath(results['build-dir'] as String));
     final outRoot = Directory(_projectPath(results['out'] as String));
     final versionRootName = config.versionPath.replaceAll(
@@ -514,3 +554,142 @@ bool _samePath(FileSystemEntity left, FileSystemEntity right) {
   }
   return leftPath == rightPath;
 }
+
+final class _ManagedScript {
+  const _ManagedScript({required this.relativePath, required this.content});
+
+  final String relativePath;
+  final String content;
+}
+
+const _powerShellBuildScript = r'''
+$ErrorActionPreference = "Stop"
+
+$hardUpdate = $false
+$version = $null
+$flutterArgs = @("--release")
+$packageArgs = @("--force")
+
+for ($i = 0; $i -lt $args.Count; $i++) {
+    $arg = $args[$i]
+    switch ($arg) {
+        "--hard-update" {
+            $hardUpdate = $true
+        }
+        "--version" {
+            if ($i + 1 -ge $args.Count) {
+                throw "--version requires a value"
+            }
+            $i++
+            $version = $args[$i]
+        }
+        "--profile" {
+            $flutterArgs = @("--profile")
+        }
+        "--debug" {
+            $flutterArgs = @("--debug")
+        }
+        "--out" {
+            if ($i + 1 -ge $args.Count) {
+                throw "--out requires a value"
+            }
+            $i++
+            $packageArgs += @("--out", $args[$i])
+        }
+        "--build-dir" {
+            if ($i + 1 -ge $args.Count) {
+                throw "--build-dir requires a value"
+            }
+            $i++
+            $packageArgs += @("--build-dir", $args[$i])
+        }
+        default {
+            $flutterArgs += $arg
+        }
+    }
+}
+
+if (-not $version) {
+    $version = Get-Date -Format "yyyyMMddHHmmss"
+}
+
+Write-Host "Building Flutter web..."
+flutter build web @flutterArgs
+
+$packageArgs += @("--version", $version)
+if ($hardUpdate) {
+    $packageArgs += "--hard-update"
+}
+
+Write-Host "Packaging hardened web build version $version..."
+dart run resilient_web_bootstrap_for_flutter:resilient_bootstrap --project . package @packageArgs
+''';
+
+const _shellBuildScript = r'''
+#!/usr/bin/env sh
+set -eu
+
+hard_update=0
+version=""
+flutter_args="--release"
+package_args="--force"
+
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --hard-update)
+      hard_update=1
+      shift
+      ;;
+    --version)
+      if [ "$#" -lt 2 ]; then
+        echo "--version requires a value" >&2
+        exit 64
+      fi
+      version="$2"
+      shift 2
+      ;;
+    --profile)
+      flutter_args="--profile"
+      shift
+      ;;
+    --debug)
+      flutter_args="--debug"
+      shift
+      ;;
+    --out)
+      if [ "$#" -lt 2 ]; then
+        echo "--out requires a value" >&2
+        exit 64
+      fi
+      package_args="$package_args --out $2"
+      shift 2
+      ;;
+    --build-dir)
+      if [ "$#" -lt 2 ]; then
+        echo "--build-dir requires a value" >&2
+        exit 64
+      fi
+      package_args="$package_args --build-dir $2"
+      shift 2
+      ;;
+    *)
+      flutter_args="$flutter_args $1"
+      shift
+      ;;
+  esac
+done
+
+if [ -z "$version" ]; then
+  version="$(date +%Y%m%d%H%M%S)"
+fi
+
+echo "Building Flutter web..."
+flutter build web $flutter_args
+
+if [ "$hard_update" -eq 1 ]; then
+  package_args="$package_args --hard-update"
+fi
+
+echo "Packaging hardened web build version $version..."
+dart run resilient_web_bootstrap_for_flutter:resilient_bootstrap --project . package $package_args --version "$version"
+''';

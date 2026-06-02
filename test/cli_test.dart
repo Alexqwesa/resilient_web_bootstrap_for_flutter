@@ -30,6 +30,17 @@ void main() {
       ).existsSync(),
       isTrue,
     );
+    final psScript = File(
+      p.join(project.path, 'tool', 'build_resilient_web.ps1'),
+    ).readAsStringSync();
+    expect(psScript, contains('--hard-update'));
+    expect(psScript, contains('Get-Date -Format "yyyyMMddHHmmss"'));
+
+    final shScript = File(
+      p.join(project.path, 'tool', 'build_resilient_web.sh'),
+    ).readAsStringSync();
+    expect(shScript, contains('--hard-update'));
+    expect(shScript, contains('date +%Y%m%d%H%M%S'));
   });
 
   test('package creates versioned output and manifest hashes', () async {
@@ -79,6 +90,32 @@ void main() {
       isA<String>().having((value) => value.length, 'length', 64),
     );
   });
+
+  test(
+    'package defaults version to local timestamp and supports hard update',
+    () async {
+      final project = await _createFlutterProject();
+      addTearDown(() => project.deleteSync(recursive: true));
+
+      var result = await _runCli(project, ['install']);
+      expect(result.exitCode, 0, reason: result.stderr.toString());
+
+      _writeBuildOutput(project);
+      result = await _runCli(project, ['package', '--hard-update', '--force']);
+      expect(result.exitCode, 0, reason: result.stderr.toString());
+
+      final manifest =
+          jsonDecode(
+                File(
+                  p.join(project.path, 'build', 'web_hardened', 'latest.json'),
+                ).readAsStringSync(),
+              )
+              as Map;
+
+      expect(manifest['version'], matches(RegExp(r'^\d{14}$')));
+      expect(manifest['hardUpdate'], isTrue);
+    },
+  );
 }
 
 Future<Directory> _createFlutterProject() async {
