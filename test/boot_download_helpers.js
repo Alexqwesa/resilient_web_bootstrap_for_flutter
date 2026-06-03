@@ -10,6 +10,8 @@
   const completedBootDownloads = new Map();
   const inflightBootDownloads = new Map();
   const bootPersistentCacheName = 'boot-downloads-v1';
+  const pinnedBootPersistentCacheName = `${bootPersistentCacheName}-pinned`;
+  const pinnedBootPersistentCacheMarkerKey = '/__resilient_boot_pinned_build__';
 
   function bootSleep(ms) {
     return new Promise(function (resolve) {
@@ -479,11 +481,34 @@
     return String(version).replace(/[^a-zA-Z0-9._-]/g, '_');
   }
 
+  function getPinnedBootBuild() {
+    const root = typeof globalThis !== 'undefined'
+      ? globalThis
+      : (typeof window !== 'undefined' ? window : null);
+    const build = root && root.__resilientPinnedBuild;
+    return build ? sanitizeBootCacheVersion(build) : '';
+  }
+
   function getBootPersistentCacheName(url) {
+    if (getPinnedBootBuild()) {
+      return pinnedBootPersistentCacheName;
+    }
+
     const version = extractBootCacheVersion(url);
     return version
       ? `${bootPersistentCacheName}-${sanitizeBootCacheVersion(version)}`
       : bootPersistentCacheName;
+  }
+
+  function getPinnedBootPersistentCacheMarkerUrl() {
+    try {
+      const origin = typeof window !== 'undefined' && window.location && window.location.origin
+        ? window.location.origin
+        : 'https://example.test';
+      return new URL(pinnedBootPersistentCacheMarkerKey, origin).toString();
+    } catch (_) {
+      return pinnedBootPersistentCacheMarkerKey;
+    }
   }
 
   function getBootPartialCacheKey(cacheKey) {
@@ -498,19 +523,63 @@
   }
 
   let lastBootPersistentCacheName = null;
+  let lastBootPersistentPinnedBuild = null;
   let bootPersistentCacheCleanupPromise = null;
+
+  async function ensurePinnedBootPersistentCacheNamespace() {
+    const pinnedBuild = getPinnedBootBuild();
+    if (!pinnedBuild || !supportsPersistentBootCache()) {
+      return;
+    }
+
+    const markerUrl = getPinnedBootPersistentCacheMarkerUrl();
+    let cache = await caches.open(pinnedBootPersistentCacheName);
+    const marker = await cache.match(markerUrl);
+    let previousBuild = '';
+    if (marker) {
+      try {
+        previousBuild = await marker.text();
+      } catch (_) {
+        previousBuild = '';
+      }
+    }
+
+    if (previousBuild && previousBuild !== pinnedBuild) {
+      await caches.delete(pinnedBootPersistentCacheName);
+      cache = await caches.open(pinnedBootPersistentCacheName);
+    }
+
+    if (previousBuild !== pinnedBuild) {
+      await cache.put(
+        markerUrl,
+        new Response(pinnedBuild, {
+          headers: { 'Content-Type': 'text/plain' },
+        }),
+      );
+    }
+  }
 
   async function ensureBootPersistentCacheNamespace(cacheName) {
     if (!supportsPersistentBootCache()) {
       return;
     }
 
-    if (lastBootPersistentCacheName === cacheName && bootPersistentCacheCleanupPromise) {
+    const pinnedBuild = cacheName === pinnedBootPersistentCacheName
+      ? getPinnedBootBuild()
+      : null;
+    if (
+      lastBootPersistentCacheName === cacheName &&
+      lastBootPersistentPinnedBuild === pinnedBuild &&
+      bootPersistentCacheCleanupPromise
+    ) {
       return bootPersistentCacheCleanupPromise;
     }
 
     lastBootPersistentCacheName = cacheName;
-    bootPersistentCacheCleanupPromise = Promise.resolve();
+    lastBootPersistentPinnedBuild = pinnedBuild;
+    bootPersistentCacheCleanupPromise = cacheName === pinnedBootPersistentCacheName
+      ? ensurePinnedBootPersistentCacheNamespace()
+      : Promise.resolve();
 
     return bootPersistentCacheCleanupPromise;
   }
@@ -528,7 +597,11 @@
     const keys = await caches.keys();
     const prefix = `${bootPersistentCacheName}-`;
     const staleKeys = keys.filter(function (key) {
-      return (key === bootPersistentCacheName || key.startsWith(prefix)) && key !== cacheName;
+      return (
+        key !== pinnedBootPersistentCacheName &&
+        (key === bootPersistentCacheName || key.startsWith(prefix)) &&
+        key !== cacheName
+      );
     });
 
     await Promise.all(staleKeys.map(function (key) {

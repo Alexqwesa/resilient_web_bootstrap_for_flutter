@@ -113,6 +113,28 @@ Promotion should copy `version/<build>/` first and replace root `index.html` and
 are not cached by nginx or the browser; immutable caching should only apply under
 `/version/`.
 
+## Direct Version URLs
+
+You can open a pinned build directly:
+
+```text
+/version/<build>/index.html
+```
+
+In this mode the shell treats `/version/<build>/` as the app base:
+
+- boot scripts are loaded from the same `/version/<build>/` directory;
+- initial boot reads `/version/<build>/latest.json`, not root `/latest.json`;
+- background sideload checks are disabled for that page;
+- `flutter.lastGoodManifest` is not overwritten by the pinned page;
+- root `latest.json` and root `version.json` are not used as the boot source.
+- boot Cache Storage uses one rotating pinned namespace, so opening another pinned
+  build replaces only the pinned boot cache and does not touch root app boot caches.
+
+This URL is safe to cache immutably because the build directory must never be changed
+after publication. If a file in `/version/<build>/` is wrong, publish a new build id
+instead of replacing files inside the old directory.
+
 ## Global Usage
 
 For CI images or one-off local use:

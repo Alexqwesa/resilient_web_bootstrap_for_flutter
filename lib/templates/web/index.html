@@ -49,6 +49,9 @@
       window.__resilientAppBase = appBase;
       window.__resilientAssetBase = assetBase;
       window.__resilientVersionPinned = !!versionBase;
+      window.__resilientPinnedBuild = versionBase
+        ? String(versionBase).replace(/\/+$/, '').split('/').pop()
+        : null;
       window.__resilientDebugBoot = isDebugDevServer && !versionBase;
       window.resilientAssetUrl = function(relativePath) {
         const cleanPath = String(relativePath || '').replace(/^\/+/, '');

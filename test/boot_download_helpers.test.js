@@ -2353,3 +2353,263 @@ test('cleanupStaleBootPersistentCacheNamespaces removes older boot caches after 
     global.caches = originalCaches;
   }
 });
+
+function makeBootCacheHarness(fetchBytes = [1, 2, 3, 4]) {
+  const originalWindow = global.window;
+  const originalCaches = global.caches;
+  const originalPinnedBuild = global.__resilientPinnedBuild;
+  const cacheStore = new Map();
+  const openCalls = [];
+  const deleteCalls = [];
+  const fetchCalls = [];
+
+  function makeHeaders(entries) {
+    const map = new Map(Object.entries(entries || {}));
+    return {
+      get(name) {
+        const target = String(name).toLowerCase();
+        for (const [key, value] of map.entries()) {
+          if (String(key).toLowerCase() === target) {
+            return value;
+          }
+        }
+        return null;
+      },
+    };
+  }
+
+  function installFetch(bytes) {
+    global.window = {
+      location: {
+        href: 'https://example.test/',
+        origin: 'https://example.test',
+      },
+      fetch: async function fetchMock(url) {
+        fetchCalls.push(String(url));
+        let done = false;
+        return {
+          status: 200,
+          headers: makeHeaders({
+            'Content-Type': 'application/octet-stream',
+          }),
+          body: {
+            getReader() {
+              return {
+                cancel() {
+                  return Promise.resolve();
+                },
+                async read() {
+                  if (done) {
+                    return { done: true, value: undefined };
+                  }
+                  done = true;
+                  return { done: false, value: Uint8Array.from(bytes) };
+                },
+              };
+            },
+          },
+          async arrayBuffer() {
+            return Uint8Array.from(bytes).buffer;
+          },
+        };
+      },
+    };
+  }
+
+  installFetch(fetchBytes);
+
+  global.caches = {
+    async keys() {
+      return Array.from(cacheStore.keys());
+    },
+    async delete(name) {
+      deleteCalls.push(String(name));
+      return cacheStore.delete(String(name));
+    },
+    async open(name) {
+      openCalls.push(String(name));
+      if (!cacheStore.has(name)) {
+        cacheStore.set(name, new Map());
+      }
+      const bucket = cacheStore.get(name);
+      return {
+        async match(requestUrl) {
+          return bucket.get(String(requestUrl)) || null;
+        },
+        async put(requestUrl, response) {
+          bucket.set(String(requestUrl), response);
+        },
+        async delete(requestUrl) {
+          return bucket.delete(String(requestUrl));
+        },
+      };
+    },
+  };
+
+  return {
+    cacheStore,
+    openCalls,
+    deleteCalls,
+    fetchCalls,
+    setPinnedBuild(build) {
+      if (build == null) {
+        delete global.__resilientPinnedBuild;
+      } else {
+        global.__resilientPinnedBuild = build;
+      }
+    },
+    installFetch,
+    restore() {
+      global.window = originalWindow;
+      global.caches = originalCaches;
+      if (originalPinnedBuild === undefined) {
+        delete global.__resilientPinnedBuild;
+      } else {
+        global.__resilientPinnedBuild = originalPinnedBuild;
+      }
+    },
+  };
+}
+
+test('root version downloads use per-version persistent cache namespaces', async () => {
+  const harness = makeBootCacheHarness();
+
+  try {
+    const helpers = await loadHelpers();
+    await helpers.downloadResumableBytes(
+      'https://example.test/version/A/main.dart.js.gz',
+      { cache: 'force-cache' },
+      {
+        label: 'main.dart.js',
+        collectBytes: true,
+        totalBytesHint: 4,
+        idleMs: 1000,
+        maxAttempts: 5,
+        retryDelayMs: 0,
+        maxRetryDelayMs: 0,
+      },
+    );
+
+    assert.ok(harness.cacheStore.has('boot-downloads-v1-A'));
+    assert.equal(harness.cacheStore.has('boot-downloads-v1-pinned'), false);
+  } finally {
+    harness.restore();
+  }
+});
+
+test('pinned version downloads use shared pinned persistent cache namespace', async () => {
+  const harness = makeBootCacheHarness();
+
+  try {
+    harness.setPinnedBuild('A');
+    const helpers = await loadHelpers();
+    await helpers.downloadResumableBytes(
+      'https://example.test/version/A/main.dart.js.gz',
+      { cache: 'force-cache' },
+      {
+        label: 'main.dart.js',
+        collectBytes: true,
+        totalBytesHint: 4,
+        idleMs: 1000,
+        maxAttempts: 5,
+        retryDelayMs: 0,
+        maxRetryDelayMs: 0,
+      },
+    );
+
+    assert.ok(harness.cacheStore.has('boot-downloads-v1-pinned'));
+    assert.equal(harness.cacheStore.has('boot-downloads-v1-A'), false);
+  } finally {
+    harness.restore();
+  }
+});
+
+test('switching pinned builds replaces only the shared pinned cache', async () => {
+  const harness = makeBootCacheHarness();
+
+  try {
+    harness.cacheStore.set('boot-downloads-v1-ROOT', new Map());
+    harness.setPinnedBuild('A');
+    const helpers = await loadHelpers();
+    await helpers.downloadResumableBytes(
+      'https://example.test/version/A/main.dart.js.gz',
+      { cache: 'force-cache' },
+      {
+        label: 'main.dart.js',
+        collectBytes: true,
+        totalBytesHint: 4,
+        idleMs: 1000,
+        maxAttempts: 5,
+        retryDelayMs: 0,
+        maxRetryDelayMs: 0,
+      },
+    );
+
+    harness.setPinnedBuild('B');
+    await helpers.downloadResumableBytes(
+      'https://example.test/version/B/main.dart.js.gz',
+      { cache: 'force-cache' },
+      {
+        label: 'main.dart.js',
+        collectBytes: true,
+        totalBytesHint: 4,
+        idleMs: 1000,
+        maxAttempts: 5,
+        retryDelayMs: 0,
+        maxRetryDelayMs: 0,
+      },
+    );
+
+    assert.deepEqual(harness.deleteCalls, ['boot-downloads-v1-pinned']);
+    assert.ok(harness.cacheStore.has('boot-downloads-v1-ROOT'));
+    assert.ok(harness.cacheStore.has('boot-downloads-v1-pinned'));
+    assert.equal(harness.cacheStore.has('boot-downloads-v1-A'), false);
+    assert.equal(harness.cacheStore.has('boot-downloads-v1-B'), false);
+  } finally {
+    harness.restore();
+  }
+});
+
+test('same pinned build reuses pinned persistent cache across helper reloads', async () => {
+  const harness = makeBootCacheHarness();
+
+  try {
+    harness.setPinnedBuild('A');
+    let helpers = await loadHelpers();
+    await helpers.downloadResumableBytes(
+      'https://example.test/version/A/main.dart.js.gz',
+      { cache: 'force-cache' },
+      {
+        label: 'main.dart.js',
+        collectBytes: true,
+        totalBytesHint: 4,
+        idleMs: 1000,
+        maxAttempts: 5,
+        retryDelayMs: 0,
+        maxRetryDelayMs: 0,
+      },
+    );
+
+    harness.installFetch([9, 9, 9, 9]);
+    helpers = await loadHelpers();
+    const result = await helpers.downloadResumableBytes(
+      'https://example.test/version/A/main.dart.js.gz',
+      { cache: 'force-cache' },
+      {
+        label: 'main.dart.js',
+        collectBytes: true,
+        totalBytesHint: 4,
+        idleMs: 1000,
+        maxAttempts: 5,
+        retryDelayMs: 0,
+        maxRetryDelayMs: 0,
+      },
+    );
+
+    assert.deepEqual(Array.from(result.bytes), [1, 2, 3, 4]);
+    assert.equal(harness.fetchCalls.length, 1);
+    assert.deepEqual(harness.deleteCalls, []);
+  } finally {
+    harness.restore();
+  }
+});

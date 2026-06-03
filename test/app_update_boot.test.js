@@ -794,12 +794,13 @@ test('app_update hard update reloads an already running session instead of sidel
 test('app_update version-pinned boot uses local latest.json and ignores lastGoodManifest', async () => {
   const pinnedManifest = makeManifest('202605141110', '');
   const lastGoodManifest = makeManifest('202605141108', 'older/');
+  const nextManifest = makeManifest('202605141111', 'next/');
   const harness = makeHarness({
     latestManifests: [pinnedManifest],
     pinnedManifest,
     versionPinned: true,
     initialLastGoodManifest: lastGoodManifest,
-    nextManifest: makeManifest('202605141111', 'next/'),
+    nextManifest,
     runBackgroundTimers: true,
   });
 
@@ -817,6 +818,15 @@ test('app_update version-pinned boot uses local latest.json and ignores lastGood
     harness.context.localStorage.getItem('flutter.lastGoodManifest'),
     JSON.stringify(lastGoodManifest),
   );
+  assert.equal(
+    harness.context.localStorage.getItem('flutter.nextManifest'),
+    JSON.stringify(nextManifest),
+  );
+  assert.equal(
+    harness.manifestCalls.some(url => url === 'https://example.test/latest.json' || url === '/latest.json'),
+    false,
+  );
+  assert.deepEqual(harness.cleanupCalls, []);
   assert.equal(harness.reloadCalls.length, 0);
 });
 
