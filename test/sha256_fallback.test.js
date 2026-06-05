@@ -1,13 +1,21 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const crypto = require('node:crypto');
+const fs = require('node:fs');
+const path = require('node:path');
 const vm = require('node:vm');
 
+const sha256FallbackPath = path.join(
+  __dirname,
+  '..',
+  'lib',
+  'templates',
+  'web',
+  'sha256_fallback.js',
+);
+
 function loadSha256Fallback() {
-  const code = require('node:fs').readFileSync(
-    require('node:path').join(__dirname, 'sha256_fallback.js'),
-    'utf8',
-  );
+  const code = fs.readFileSync(sha256FallbackPath, 'utf8');
   const context = { globalThis: {} };
   vm.runInNewContext(code, context);
   return context.globalThis.Sha256Fallback;

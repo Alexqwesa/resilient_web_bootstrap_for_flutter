@@ -1,7 +1,15 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
+const path = require('node:path');
 
-const helpers = require('./flutter_bootstrap_helpers.js');
+const helpers = require(path.join(
+  __dirname,
+  '..',
+  'lib',
+  'templates',
+  'web',
+  'flutter_bootstrap_helpers.js',
+));
 
 test('chooseCanvasKitBase selects chromium variant only for crossOriginIsolated', () => {
   assert.equal(

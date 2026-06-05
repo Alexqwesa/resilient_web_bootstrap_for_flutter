@@ -1,6 +1,16 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const crypto = require('node:crypto');
+const path = require('node:path');
+
+const bootDownloadHelpersTemplatePath = path.join(
+  __dirname,
+  '..',
+  'lib',
+  'templates',
+  'web',
+  'boot_download_helpers.js',
+);
 
 function sha256Hex(bytes) {
   return crypto
@@ -48,8 +58,8 @@ function installAxiosMock(responder) {
 }
 
 async function loadHelpers() {
-  delete require.cache[require.resolve('./boot_download_helpers.js')];
-  return require('./boot_download_helpers.js');
+  delete require.cache[require.resolve(bootDownloadHelpersTemplatePath)];
+  return require(bootDownloadHelpersTemplatePath);
 }
 
 test('downloadResumableBytes resumes with Range after an early EOF', async () => {
@@ -615,7 +625,7 @@ test('downloadResumableBytes reuses completed downloads from persistent cache af
       },
     );
 
-    delete require.cache[require.resolve('./boot_download_helpers.js')];
+    delete require.cache[require.resolve(bootDownloadHelpersTemplatePath)];
     helpers = await loadHelpers();
     const second = await helpers.downloadResumableBytes(
       'https://example.test/assets/AssetManifest.bin.gz',
@@ -2104,7 +2114,7 @@ test('downloadResumableBytes resumes a partially cached boot download after modu
     assert.equal(rootCache.has('https://example.test/canvaskit.wasm.gz'), false);
     assert.equal(rootCache.has('https://example.test/canvaskit.wasm.gz?_bootPartial=1'), true);
 
-    delete require.cache[require.resolve('./boot_download_helpers.js')];
+    delete require.cache[require.resolve(bootDownloadHelpersTemplatePath)];
     helpers = await loadHelpers();
 
     const result = await helpers.downloadResumableBytes(

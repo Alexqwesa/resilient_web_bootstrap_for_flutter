@@ -4,6 +4,15 @@ const fs = require('node:fs');
 const path = require('node:path');
 const vm = require('node:vm');
 
+const appUpdateTemplatePath = path.join(
+  __dirname,
+  '..',
+  'lib',
+  'templates',
+  'web',
+  'app_update.js',
+);
+
 function makeClassList() {
   const values = new Set();
 
@@ -554,7 +563,7 @@ _flutter.loader.load({
   };
 
   const source = fs.readFileSync(
-    path.join(__dirname, 'app_update.js'),
+    appUpdateTemplatePath,
     'utf8',
   );
 
