@@ -1,3 +1,4 @@
+import 'dart:collection';
 import 'dart:convert';
 import 'dart:io';
 
@@ -7,6 +8,15 @@ import 'package:path/path.dart' as p;
 import 'config.dart';
 import 'hashing.dart';
 import 'templates.dart';
+
+String _normalizeStateKey(String relativePath) {
+  return relativePath.replaceAll(r'\', '/');
+}
+
+String _stateKeyToOsPath(String stateKey) {
+  final normalized = _normalizeStateKey(stateKey);
+  return p.joinAll(p.posix.split(normalized));
+}
 
 final class ResilientBootstrapCli {
   Future<void> run(List<String> arguments) async {
@@ -138,16 +148,34 @@ abstract base class ProjectCommand {
     if (decoded is! Map || decoded['files'] is! Map) {
       throw FormatException('Invalid state file: ${stateFile.path}');
     }
-    return (decoded['files'] as Map).map(
-      (key, value) => MapEntry(key.toString(), value.toString()),
-    );
+
+    final merged = <String, ({String hash, bool fromPosixKey})>{};
+    for (final entry in (decoded['files'] as Map).entries) {
+      final rawKey = entry.key.toString();
+      final rawValue = entry.value.toString();
+      final normalizedKey = _normalizeStateKey(rawKey);
+      final fromPosixKey = !rawKey.contains(r'\');
+
+      final existing = merged[normalizedKey];
+      if (existing == null || (fromPosixKey && !existing.fromPosixKey)) {
+        merged[normalizedKey] = (hash: rawValue, fromPosixKey: fromPosixKey);
+      }
+    }
+
+    return merged.map((key, value) => MapEntry(key, value.hash));
   }
 
   void saveState(Map<String, String> files) {
     stateDir.createSync(recursive: true);
     const encoder = JsonEncoder.withIndent('  ');
+
+    final normalized = SplayTreeMap<String, String>();
+    for (final entry in files.entries) {
+      normalized[_normalizeStateKey(entry.key)] = entry.value;
+    }
+
     stateFile.writeAsStringSync(
-      encoder.convert({'version': 1, 'files': files}),
+      encoder.convert({'version': 1, 'files': normalized}),
     );
   }
 }
@@ -170,8 +198,10 @@ final class InstallCommand extends ProjectCommand {
     var backedUpAnyFile = false;
 
     for (final fileName in installedTemplateFiles) {
-      final relativePath = p.join('web', fileName);
-      final destination = File(p.join(projectRoot.path, relativePath));
+      final relativePath = p.posix.join('web', fileName);
+      final destination = File(
+        p.join(projectRoot.path, _stateKeyToOsPath(relativePath)),
+      );
       final template = await readTemplate(fileName);
       final desired = renderTemplate(template, config);
       final desiredHash = sha256Text(desired);
@@ -186,7 +216,10 @@ final class InstallCommand extends ProjectCommand {
           );
         }
         if (currentHash != desiredHash) {
-          _copyFile(destination, File(p.join(backupDir.path, relativePath)));
+          _copyFile(
+            destination,
+            File(p.join(backupDir.path, _stateKeyToOsPath(relativePath))),
+          );
           backedUpAnyFile = true;
         }
       }
@@ -197,22 +230,25 @@ final class InstallCommand extends ProjectCommand {
     }
 
     for (final script in _buildScripts()) {
-      final destination = File(p.join(projectRoot.path, script.relativePath));
+      final relativePath = _normalizeStateKey(script.relativePath);
+      final destination = File(
+        p.join(projectRoot.path, _stateKeyToOsPath(relativePath)),
+      );
       final desiredHash = sha256Text(script.content);
 
       if (destination.existsSync()) {
         final currentHash = sha256File(destination);
-        final previousHash = previousState[script.relativePath];
+        final previousHash = previousState[relativePath];
         if (!force && previousHash != null && currentHash != previousHash) {
           throw StateError(
-            '${script.relativePath} was edited since the last install. '
+            '$relativePath was edited since the last install. '
             'Re-run with --force to overwrite it.',
           );
         }
         if (currentHash != desiredHash) {
           _copyFile(
             destination,
-            File(p.join(backupDir.path, script.relativePath)),
+            File(p.join(backupDir.path, _stateKeyToOsPath(relativePath))),
           );
           backedUpAnyFile = true;
         }
@@ -220,7 +256,7 @@ final class InstallCommand extends ProjectCommand {
 
       destination.parent.createSync(recursive: true);
       destination.writeAsStringSync(script.content);
-      nextState[script.relativePath] = desiredHash;
+      nextState[relativePath] = desiredHash;
     }
 
     saveState(nextState);
@@ -264,7 +300,7 @@ final class UninstallCommand extends ProjectCommand {
     }
 
     for (final entry in state.entries) {
-      final file = File(p.join(projectRoot.path, entry.key));
+      final file = File(p.join(projectRoot.path, _stateKeyToOsPath(entry.key)));
       if (!file.existsSync()) {
         continue;
       }
