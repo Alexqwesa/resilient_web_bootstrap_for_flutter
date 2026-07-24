@@ -1,0 +1,80 @@
+name: CI / Publish
+
+on:
+  push:
+    branches: [master, main]
+    tags:
+      - 'v[0-9]*'
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+  workflow_dispatch: {}
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # ════════════════════════════════════════════════════════════════════════════
+  # 1 · Static analysis
+  # ════════════════════════════════════════════════════════════════════════════
+  analyze:
+    name: Analyze
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dart-lang/setup-dart@v1
+        with: { sdk: stable }
+      - run: dart pub get
+      - run: dart analyze --fatal-warnings
+
+  # ════════════════════════════════════════════════════════════════════════════
+  # 2 · Unit tests (Dart CLI + Node bootstrap helpers)
+  # ════════════════════════════════════════════════════════════════════════════
+  test:
+    name: Test
+    needs: analyze
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dart-lang/setup-dart@v1
+        with: { sdk: stable }
+      - uses: actions/setup-node@v4
+        with: { node-version: '20' }
+      - run: dart pub get
+      - name: Run Dart tests
+        run: dart test --timeout=60s
+      - name: Run Node tests
+        run: |
+          node --test test/app_update_boot.test.js
+          node --test test/boot_download_helpers.test.js
+          node --test test/flutter_bootstrap_helpers.test.js
+          node --test test/sha256_fallback.test.js
+
+  # ════════════════════════════════════════════════════════════════════════════
+  # 3 · Publish to pub.dev  (tag pushes only, after tests pass)
+  #
+  # One-time setup required:
+  #   pub.dev → package → Settings → "Automated publishing"
+  #   → add this repo + environment name "pub.dev"
+  # ════════════════════════════════════════════════════════════════════════════
+  publish:
+    name: Publish to pub.dev
+    needs: test
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/')
+    environment: pub.dev
+    permissions:
+      id-token: write
+      contents: read
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dart-lang/setup-dart@v1
+        with: { sdk: stable }
+      - run: dart pub get
+
+      - name: Dry-run
+        run: dart pub publish --dry-run
+
+      - name: Publish
+        run: dart pub publish --force

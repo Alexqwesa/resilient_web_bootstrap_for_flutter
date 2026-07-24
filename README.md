@@ -69,9 +69,16 @@ Add the package as a dev dependency:
 
 ```yaml
 dev_dependencies:
+  resilient_web_bootstrap_for_flutter: ^0.1.0
+```
+
+Or from git:
+
+```yaml
+dev_dependencies:
   resilient_web_bootstrap_for_flutter:
     git:
-      url: <repo-url>
+      url: https://github.com/Alexqwesa/resilient_web_bootstrap_for_flutter
 ```
 
 Install or update the managed `web/` files:
@@ -140,7 +147,7 @@ instead of replacing files inside the old directory.
 For CI images or one-off local use:
 
 ```bash
-dart pub global activate --source git <repo-url>
+dart pub global activate resilient_web_bootstrap_for_flutter
 resilient_bootstrap --project . install
 resilient_bootstrap --project . package --force
 ```
