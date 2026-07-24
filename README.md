@@ -305,7 +305,9 @@ harden further.
 
 ```bash
 dart test
+dart test test/e2e_test.dart
 node --test test/app_update_boot.test.js
 node --test test/boot_download_helpers.test.js
 node --test test/flutter_bootstrap_helpers.test.js
+node --test test/sha256_fallback.test.js
 ```
