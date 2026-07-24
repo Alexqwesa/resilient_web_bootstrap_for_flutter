@@ -33,3 +33,12 @@ doc/api/
 /.idea/modules.xml
 /.idea/inspectionProfiles/Project_Default.xml
 /.idea/resilient_web_bootstrap_for_flutter.iml
+
+# Keep hand-written JS under test/ and package templates trackable.
+!lib/**/*.js
+!test/**/*.js
+!test/**/*.mjs
+
+# Chrome e2e generated deploy trees + local npm install
+test/e2e_chrome/sites/
+test/e2e_chrome/node_modules/

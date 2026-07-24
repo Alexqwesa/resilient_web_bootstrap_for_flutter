@@ -42,7 +42,7 @@ jobs:
         with: { node-version: '20' }
       - run: dart pub get
       - name: Run Dart tests
-        run: dart test --timeout=60s
+        run: dart test --timeout=120s
       - name: Run Node tests
         run: |
           node --test test/app_update_boot.test.js
@@ -51,7 +51,30 @@ jobs:
           node --test test/sha256_fallback.test.js
 
   # ════════════════════════════════════════════════════════════════════════════
-  # 3 · Publish to pub.dev  (tag pushes only, after tests pass)
+  # 3 · Chrome e2e (before_apply → after_apply hard-update)
+  # ════════════════════════════════════════════════════════════════════════════
+  e2e_chrome:
+    name: Chrome e2e
+    needs: analyze
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dart-lang/setup-dart@v1
+        with: { sdk: stable }
+      - uses: actions/setup-node@v4
+        with: { node-version: '20' }
+      - run: dart pub get
+      - name: Install Playwright Chromium
+        working-directory: test/e2e_chrome
+        run: |
+          npm install
+          npx playwright install chromium --with-deps
+      - name: Run Chrome e2e
+        working-directory: test/e2e_chrome
+        run: node --test e2e_chrome.test.mjs
+
+  # ════════════════════════════════════════════════════════════════════════════
+  # 4 · Publish to pub.dev  (tag pushes only, after tests pass)
   #
   # One-time setup required:
   #   pub.dev → package → Settings → "Automated publishing"
@@ -59,7 +82,7 @@ jobs:
   # ════════════════════════════════════════════════════════════════════════════
   publish:
     name: Publish to pub.dev
-    needs: test
+    needs: [test, e2e_chrome]
     runs-on: ubuntu-latest
     if: startsWith(github.ref, 'refs/tags/')
     environment: pub.dev

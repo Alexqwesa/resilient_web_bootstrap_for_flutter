@@ -1,0 +1,11 @@
+{
+  "name": "resilient-web-bootstrap-e2e-chrome",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node --test e2e_chrome.test.mjs"
+  },
+  "devDependencies": {
+    "playwright": "^1.54.1"
+  }
+}

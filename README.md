@@ -311,3 +311,22 @@ node --test test/boot_download_helpers.test.js
 node --test test/flutter_bootstrap_helpers.test.js
 node --test test/sha256_fallback.test.js
 ```
+
+Chrome e2e builds two deploy trees (`before_apply`, `after_apply`), serves them with
+byte-range support, and drives real Chromium through Playwright:
+
+```bash
+cd test/e2e_chrome
+npm install
+npx playwright install chromium
+node --test e2e_chrome.test.mjs
+```
+
+To watch the browser window (headed):
+
+```powershell
+cd test/e2e_chrome
+$env:E2E_HEADED='1'; node --test e2e_chrome.test.mjs
+```
+
+Optional: `$env:E2E_SLOWMO_MS='500'` slows each action; `$env:E2E_CHROME_CHANNEL='chrome'` uses installed Google Chrome.
