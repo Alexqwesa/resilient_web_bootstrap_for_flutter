@@ -213,28 +213,47 @@ dart run resilient_web_bootstrap_for_flutter:resilient_bootstrap --project . uni
 - Serve `/version/` files with immutable caching.
 - Preserve byte-range support for `/version/` files.
 - Do not server-gzip the generated `.gz` files again.
+- Add Content Security Policy headers from nginx if your site uses CSP.
 
 Example nginx shape:
 
 ```nginx
-location ^~ /version/ {
-  try_files $uri =404;
-  add_header Cache-Control "public, max-age=31536000, immutable" always;
-  add_header Accept-Ranges "bytes" always;
-  gzip off;
-  gzip_static off;
-}
+server {
+  # Other server config: listen, server_name, root, TLS, etc.
 
-location = /index.html {
-  try_files $uri =404;
-  add_header Cache-Control "no-cache, must-revalidate" always;
-}
+  # Current bootstrap needs blob: for decompressed boot scripts.
+  # Flutter CanvasKit/WebAssembly may need 'wasm-unsafe-eval'.
+  # The managed index.html currently contains inline style/script, so either keep
+  # 'unsafe-inline' here or replace it with CSP nonces/hashes in your deployment.
+  set $resilient_bootstrap_csp "default-src 'self'; script-src 'self' blob: 'wasm-unsafe-eval' 'unsafe-inline'; worker-src 'self' blob:; connect-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; object-src 'none'; base-uri 'self'";
 
-location = /latest.json {
-  try_files $uri =404;
-  add_header Cache-Control "no-cache, must-revalidate" always;
+  location ^~ /version/ {
+    try_files $uri =404;
+    add_header Cache-Control "public, max-age=31536000, immutable" always;
+    add_header Content-Security-Policy $resilient_bootstrap_csp always;
+    add_header Accept-Ranges "bytes" always;
+    gzip off;
+    gzip_static off;
+  }
+
+  location = /index.html {
+    try_files $uri =404;
+    add_header Cache-Control "no-cache, must-revalidate" always;
+    add_header Content-Security-Policy $resilient_bootstrap_csp always;
+  }
+
+  location = /latest.json {
+    try_files $uri =404;
+    add_header Cache-Control "no-cache, must-revalidate" always;
+    add_header Content-Security-Policy $resilient_bootstrap_csp always;
+  }
 }
 ```
+
+In nginx, `add_header` directives are inherited only when the child `location` does
+not define its own `add_header`. Because the example above sets cache headers inside
+locations, it repeats the CSP header in those same locations. If you move cache
+headers to a shared include, keep CSP in that include too.
 
 ## Tests
 

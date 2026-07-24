@@ -27,3 +27,9 @@ doc/api/
 .flutter-plugins
 .flutter-plugins-dependencies
 
+/.idea/caches/deviceStreaming.xml
+/.idea/markdown.xml
+/.idea/misc.xml
+/.idea/modules.xml
+/.idea/inspectionProfiles/Project_Default.xml
+/.idea/resilient_web_bootstrap_for_flutter.iml
