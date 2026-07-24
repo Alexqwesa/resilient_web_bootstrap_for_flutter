@@ -216,28 +216,22 @@ dart run resilient_web_bootstrap_for_flutter:resilient_bootstrap --project . uni
 
 ## Server Requirements
 
+Default setup does **not** need Content-Security-Policy. Caching and byte-range support are enough:
+
 - Serve `/index.html` and `/latest.json` with `no-cache` or `no-store`.
 - Serve `/version/` files with immutable caching.
 - Preserve byte-range support for `/version/` files.
 - Do not server-gzip the generated `.gz` files again.
-- Add Content Security Policy headers from nginx if your site uses CSP.
 
-Example nginx shape:
+Example nginx shape (no CSP):
 
 ```nginx
 server {
   # Other server config: listen, server_name, root, TLS, etc.
 
-  # Current bootstrap needs blob: for decompressed boot scripts.
-  # Flutter CanvasKit/WebAssembly may need 'wasm-unsafe-eval'.
-  # The managed index.html currently contains inline style/script, so either keep
-  # 'unsafe-inline' here or replace it with CSP nonces/hashes in your deployment.
-  set $resilient_bootstrap_csp "default-src 'self'; script-src 'self' blob: 'wasm-unsafe-eval' 'unsafe-inline'; worker-src 'self' blob:; connect-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; object-src 'none'; base-uri 'self'";
-
   location ^~ /version/ {
     try_files $uri =404;
     add_header Cache-Control "public, max-age=31536000, immutable" always;
-    add_header Content-Security-Policy $resilient_bootstrap_csp always;
     add_header Accept-Ranges "bytes" always;
     gzip off;
     gzip_static off;
@@ -246,21 +240,66 @@ server {
   location = /index.html {
     try_files $uri =404;
     add_header Cache-Control "no-cache, must-revalidate" always;
-    add_header Content-Security-Policy $resilient_bootstrap_csp always;
   }
 
   location = /latest.json {
     try_files $uri =404;
     add_header Cache-Control "no-cache, must-revalidate" always;
-    add_header Content-Security-Policy $resilient_bootstrap_csp always;
   }
 }
 ```
 
-In nginx, `add_header` directives are inherited only when the child `location` does
-not define its own `add_header`. Because the example above sets cache headers inside
-locations, it repeats the CSP header in those same locations. If you move cache
-headers to a shared include, keep CSP in that include too.
+## Content Security Policy (optional)
+
+Skip this section unless your site already enforces CSP (or you want to add one).
+Without a CSP header, browsers use their normal defaults and this bootstrap works as-is.
+
+If you do send CSP, put it on **HTML documents** only (`/index.html` and pinned
+`/version/<build>/index.html`). Headers on `.js`, `.json`, `.wasm`, or `.gz`
+responses do not control page script policy.
+
+This package currently needs:
+
+- `script-src 'self' blob: 'unsafe-inline' 'wasm-unsafe-eval'`
+  - `'self'`: normal same-origin scripts
+  - `blob:`: gunzipped boot scripts loaded via `URL.createObjectURL`
+  - `'unsafe-inline'`: inline scripts in managed `index.html`
+  - `'wasm-unsafe-eval'`: Flutter CanvasKit / WebAssembly
+- `style-src 'self' 'unsafe-inline'`: inline loader styles
+- `worker-src 'self' blob:`: workers that may use blob URLs
+- `connect-src 'self'`: `fetch` for `latest.json` and `/version/` downloads
+- `img-src 'self' data:` and `font-src 'self' data:`: icons / Flutter assets
+
+Example policy string:
+
+```text
+default-src 'self'; script-src 'self' blob: 'unsafe-inline' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; worker-src 'self' blob:; connect-src 'self'; img-src 'self' data:; font-src 'self' data:; object-src 'none'; base-uri 'self'
+```
+
+Example nginx addition for HTML documents:
+
+```nginx
+set $resilient_bootstrap_csp "default-src 'self'; script-src 'self' blob: 'unsafe-inline' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; worker-src 'self' blob:; connect-src 'self'; img-src 'self' data:; font-src 'self' data:; object-src 'none'; base-uri 'self'";
+
+location = /index.html {
+  try_files $uri =404;
+  add_header Cache-Control "no-cache, must-revalidate" always;
+  add_header Content-Security-Policy $resilient_bootstrap_csp always;
+}
+
+# Needed only if users open pinned builds as documents:
+# /version/<build>/index.html
+location ~ ^/version/[^/]+/index\.html$ {
+  try_files $uri =404;
+  add_header Cache-Control "public, max-age=31536000, immutable" always;
+  add_header Content-Security-Policy $resilient_bootstrap_csp always;
+}
+```
+
+In nginx, `add_header` in a `location` is not inherited from the parent when that
+`location` already defines its own `add_header`. Repeat CSP next to Cache-Control
+in those HTML locations. Prefer nonces/hashes over `'unsafe-inline'` if you
+harden further.
 
 ## Tests
 
