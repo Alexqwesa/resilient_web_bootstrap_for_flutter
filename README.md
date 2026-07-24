@@ -345,3 +345,7 @@ $env:E2E_HEADED='1'; node --test e2e_chrome_flutter.test.mjs
 ```
 
 Optional: `$env:E2E_SLOWMO_MS='500'` slows each action; `$env:E2E_CHROME_CHANNEL='chrome'` uses installed Google Chrome.
+
+## Third-party
+
+Bundled `lib/templates/web/fflate.min.js` is [fflate](https://github.com/101arrowz/fflate) 0.8.2 (MIT). See `LICENSE`.

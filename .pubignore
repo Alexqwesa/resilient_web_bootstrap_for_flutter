@@ -1,0 +1,11 @@
+# Keep the published package focused on the CLI + templates.
+# Flutter e2e fixtures declare flutter/web and would warn on `pub publish`.
+
+test/e2e_chrome/fixtures/
+test/e2e_chrome/sites/
+test/e2e_chrome/sites_flutter/
+test/e2e_chrome/node_modules/
+test/e2e_chrome/*.log
+test/e2e_chrome/package-lock.json
+**/*.log
+.idea/

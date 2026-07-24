@@ -43,3 +43,5 @@ doc/api/
 test/e2e_chrome/sites/
 test/e2e_chrome/sites_flutter/
 test/e2e_chrome/node_modules/
+test/e2e_chrome/*.log
+*.log
