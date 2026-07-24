@@ -41,4 +41,5 @@ doc/api/
 
 # Chrome e2e generated deploy trees + local npm install
 test/e2e_chrome/sites/
+test/e2e_chrome/sites_flutter/
 test/e2e_chrome/node_modules/

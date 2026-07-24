@@ -1,0 +1,22 @@
+name: e2e_chrome_flutter_app
+description: Minimal Flutter web app for resilient bootstrap Chrome e2e.
+publish_to: none
+version: 0.1.0
+
+environment:
+  sdk: ">=3.10.0 <4.0.0"
+
+dependencies:
+  flutter:
+    sdk: flutter
+  web: ^1.1.1
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  # Path is rewritten by prepare_sites_flutter.dart to the repo root.
+  resilient_web_bootstrap_for_flutter:
+    path: ../../../
+
+flutter:
+  uses-material-design: true
