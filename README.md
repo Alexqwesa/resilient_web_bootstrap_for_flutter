@@ -2,33 +2,37 @@
 
 **Make Flutter Web survive bad networks, stale caches, and risky deploys.**
 
-Flutter Web is usually easy: deploy `index.html`, `flutter_bootstrap.js`, `main.dart.js`, and let the browser load the app.
+A resilient, version-aware bootstrap and deployment layer for Flutter Web.
 
-That works well until one of these happens:
+Flutter Web’s default bootstrap works well under ideal conditions. In real
+deployments, however, large boot assets may stall, users may load an application
+while a new release is being deployed, and browser or service-worker caches may
+retain an incompatible mixture of old and new files.
 
-- the user has a slow or unstable connection;
-- a large file like `main.dart.js` or `canvaskit.wasm` stalls halfway;
-- the server is updated while someone is still loading the old app;
-- the browser keeps a mix of old and new cached files;
-- users are told to “press F5 and try again”.
+`resilient_web_bootstrap_for_flutter` adds a controlled boot process designed
+for unreliable networks and safe production updates.
 
-This package adds a hardened boot layer for Flutter Web. It treats your web build as a **versioned release**, not as a loose set of files.
+It packages every Flutter Web build as an immutable, versioned release and
+loads it through a small uncached entry point. Large boot files can be
+downloaded as compressed, resumable assets and verified with SHA-256 before
+they are used. The currently running application can remain available while
+the next release downloads in the background, and built-in recovery pages help
+repair broken loader, browser, or service-worker cache state.
 
-Use it for internal portals, offshore sites, kiosks, iframe apps, operations dashboards, and any Flutter Web app where **“reload and hope” is not acceptable**.
+Use it when “refresh and try again” is not an acceptable recovery strategy:
+internal portals, offshore and remote sites, kiosks, iframe applications,
+operations dashboards, and other long-running Flutter Web applications.
 
-## What You Get
-
-| Feature | What it means |
-|---|---|
-| **Versioned releases** | Every build lives under `/version/<build>/`, so old and new users do not fight over the same files. |
-| **Tiny root entry** | Only `index.html` and `latest.json` stay at the root. They point to the active version. |
-| **Resumable downloads** | Large boot files can continue after a stall instead of starting again from zero. |
-| **Gzip boot files** | Big files such as `main.dart.js` and `canvaskit.wasm` can be transferred much smaller. |
-| **SHA-256 checks** | Downloaded boot files are checked before the loader trusts them. |
-| **Background updates** | The current app keeps running while the next version downloads in the background. |
-| **Hard update mode** | Force old boot state to be ignored when a release must be loaded cleanly. |
-| **Cache repair page** | Give users a safe way to recover from broken browser, service-worker, or loader cache state. |
-| **Dart CLI** | Install web files, generate helper scripts, and package `flutter build web` output automatically. |
+**Highlights**
+- Immutable, versioned releases under /version/<build>/
+- Safe deployment without mixing files from different releases
+- Resumable downloads for large Flutter boot assets
+- Pre-compressed main.dart.js and CanvasKit files
+- SHA-256 integrity verification
+- Background release downloads
+- Optional forced clean updates
+- Cache-repair and cleanup pages
+- Dart CLI for installation, validation, and build packaging
 
 ## Tradeoffs
 
