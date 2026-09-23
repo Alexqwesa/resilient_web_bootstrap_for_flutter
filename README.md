@@ -53,6 +53,8 @@ Then it post-processes `flutter build web` output into a versioned layout:
 ```text
 index.html
 latest.json
+robots.txt        # copied through when present in build/web
+sitemap.xml       # copied through when present in build/web
 version/<build>/
   index.html
   latest.json
@@ -123,6 +125,10 @@ Promotion should copy `version/<build>/` first and replace root `index.html` and
 `latest.json` last. Configure nginx so root `index.html`, `/`, and `latest.json`
 are not cached by nginx or the browser; immutable caching should only apply under
 `/version/`.
+
+Root crawler files from the Flutter build, such as `robots.txt`, `sitemap.xml`,
+and `sitemap_index.xml`, are copied to the packaged output root. They are not boot
+assets and are not listed in `latest.json`.
 
 ## Direct Version URLs
 
@@ -223,6 +229,7 @@ dart run resilient_web_bootstrap_for_flutter:resilient_bootstrap --project . uni
 Default setup does **not** need Content-Security-Policy. Caching and byte-range support are enough:
 
 - Serve `/index.html` and `/latest.json` with `no-cache` or `no-store`.
+- Serve `/robots.txt` and sitemap files from the output root when present.
 - Serve `/version/` files with immutable caching.
 - Preserve byte-range support for `/version/` files.
 - Do not server-gzip the generated `.gz` files again.
@@ -247,6 +254,16 @@ server {
   }
 
   location = /latest.json {
+    try_files $uri =404;
+    add_header Cache-Control "no-cache, must-revalidate" always;
+  }
+
+  location = /robots.txt {
+    try_files $uri =404;
+    add_header Cache-Control "no-cache, must-revalidate" always;
+  }
+
+  location ~ ^/(sitemap|sitemap_index)\.xml$ {
     try_files $uri =404;
     add_header Cache-Control "no-cache, must-revalidate" always;
   }

@@ -388,6 +388,12 @@ final class PackageCommand extends ProjectCommand {
     RegExp(r'^assets/(AssetManifest|FontManifest)\.(bin|json)$'),
   ];
 
+  static const _rootPassthroughFiles = <String>[
+    'robots.txt',
+    'sitemap.xml',
+    'sitemap_index.xml',
+  ];
+
   Future<void> run() async {
     ensureFlutterProject();
     final config = loadConfig();
@@ -422,6 +428,7 @@ final class PackageCommand extends ProjectCommand {
     versionDir.createSync(recursive: true);
     _copyDirectory(buildDir, versionDir, overwrite: true);
     await _copyRuntimeOverlay(config, versionDir);
+    _copyRootPassthroughFiles(buildDir, outRoot);
     _gzipBootFiles(versionDir);
 
     final manifest = _buildManifest(
@@ -466,6 +473,16 @@ final class PackageCommand extends ProjectCommand {
     for (final file in _bootFiles(versionDir)) {
       final gzFile = File('${file.path}.gz');
       gzFile.writeAsBytesSync(gzip.encode(file.readAsBytesSync()));
+    }
+  }
+
+  void _copyRootPassthroughFiles(Directory buildDir, Directory outRoot) {
+    for (final fileName in _rootPassthroughFiles) {
+      final source = File(p.join(buildDir.path, fileName));
+      if (!source.existsSync()) {
+        continue;
+      }
+      _copyFile(source, File(p.join(outRoot.path, fileName)));
     }
   }
 

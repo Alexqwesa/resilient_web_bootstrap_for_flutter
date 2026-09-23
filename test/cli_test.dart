@@ -64,6 +64,14 @@ void main() {
     expect(File(p.join(out.path, 'index.html')).existsSync(), isTrue);
     expect(File(p.join(out.path, 'latest.json')).existsSync(), isTrue);
     expect(
+      File(p.join(out.path, 'robots.txt')).readAsStringSync(),
+      contains('User-agent: *'),
+    );
+    expect(
+      File(p.join(out.path, 'sitemap.xml')).readAsStringSync(),
+      contains('<urlset'),
+    );
+    expect(
       File(p.join(versionDir.path, 'main.dart.js.gz')).existsSync(),
       isTrue,
     );
@@ -80,6 +88,8 @@ void main() {
 
     final files = (manifest['files'] as List).cast<Map>();
     final main = files.singleWhere((file) => file['path'] == 'main.dart.js');
+    expect(files.any((file) => file['path'] == 'robots.txt'), isFalse);
+    expect(files.any((file) => file['path'] == 'sitemap.xml'), isFalse);
     expect(main['gzPath'], 'main.dart.js.gz');
     expect(
       main['gzSize'],
@@ -157,6 +167,10 @@ void _writeBuildOutput(Directory project) {
   File(
     p.join(root.path, 'main_module.bootstrap.js'),
   ).writeAsStringSync('console.log("module");');
+  File(p.join(root.path, 'robots.txt')).writeAsStringSync('User-agent: *\n');
+  File(p.join(root.path, 'sitemap.xml')).writeAsStringSync(
+    '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9"></urlset>',
+  );
 
   final assets = Directory(p.join(root.path, 'assets'))
     ..createSync(recursive: true);
