@@ -1,6 +1,6 @@
 name: resilient_web_bootstrap_for_flutter
 description: CLI tooling that installs and packages a hardened Flutter web bootstrap.
-version: 0.1.0
+version: 0.1.1
 homepage: https://github.com/Alexqwesa/resilient_web_bootstrap_for_flutter
 repository: https://github.com/Alexqwesa/resilient_web_bootstrap_for_flutter
 issue_tracker: https://github.com/Alexqwesa/resilient_web_bootstrap_for_flutter/issues

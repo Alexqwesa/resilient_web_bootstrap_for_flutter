@@ -1,3 +1,7 @@
+## 0.1.1
+
+- Add `example/README.md` with the install-and-package workflow.
+
 ## 0.1.0
 
 - Initial public release of the hardened Flutter web bootstrap CLI.
