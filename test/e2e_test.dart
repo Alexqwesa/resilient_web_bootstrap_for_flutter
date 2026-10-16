@@ -316,9 +316,10 @@ Future<void> _servePackaged(Directory outRoot, HttpRequest request) async {
   final bytes = file.readAsBytesSync();
   final isHtml = cleaned == 'index.html' || cleaned.endsWith('/index.html');
   final isLatest = cleaned == 'latest.json' || cleaned.endsWith('/latest.json');
+  final isStatus = cleaned == 'status.json';
   final isVersionAsset = cleaned.startsWith('version/');
 
-  if (isHtml || isLatest) {
+  if (isHtml || isLatest || isStatus) {
     request.response.headers.set(
       HttpHeaders.cacheControlHeader,
       'no-cache, must-revalidate',

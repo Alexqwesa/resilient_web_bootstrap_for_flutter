@@ -45,11 +45,12 @@ export function startMutableStaticServer(site) {
     const bytes = fs.readFileSync(filePath);
     const isHtml = relative === 'index.html' || /(?:^|\/)index\.html$/.test(relative);
     const isLatest = relative === 'latest.json' || /(?:^|\/)latest\.json$/.test(relative);
+    const isStatus = relative === 'status.json';
     const headers = {
       'Content-Type': contentTypeFor(filePath),
       'Accept-Ranges': 'bytes',
     };
-    if (isHtml || isLatest) {
+    if (isHtml || isLatest || isStatus) {
       headers['Cache-Control'] = 'no-cache, must-revalidate';
     } else if (relative.startsWith('version/')) {
       headers['Cache-Control'] = 'public, max-age=31536000, immutable';

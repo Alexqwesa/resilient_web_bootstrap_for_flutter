@@ -260,11 +260,93 @@
   #ck-sub { margin-top: 10px; font-size: 12px; color:#aaa; }
   .ck-hide { display: none !important; }
 
+  #resilient-early-shell {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    text-align: center;
+  }
+  #resilient-status-msg {
+    max-width: min(520px, 86vw);
+    margin-top: 28px;
+    padding: 0 16px;
+    font: 14px/1.45 system-ui, -apple-system, Segoe UI, Roboto, Arial;
+    color: #d7dee8;
+    white-space: pre-wrap;
+  }
+
   </style>
+
+  <div id="resilient-early-shell">
+    <div class="loader-container">
+      <span class="bracket left">{</span>
+      <span class="kt-text">__RESILIENT_LOADER_LABEL__</span>
+      <span class="bracket right">}</span>
+    </div>
+    <div id="resilient-status-msg"></div>
+  </div>
 
 <script>
   // Root sideload: optional hardUpdate preflight (see app_update.js for cache discard + background reload).
   (async function resilientBoot() {
+    const STATUS_URL = "/status.json";
+    const STATUS_HOLD_RECHECK_MS = 20_000;
+
+    function normalizeBootStatus(data) {
+      if (!data || typeof data !== "object") {
+        return null;
+      }
+      const loading = typeof data.loading === "string" ? data.loading.trim() : "";
+      const hold = typeof data.hold === "string" ? data.hold.trim() : "";
+      const after = typeof data.after === "string" ? data.after.trim() : "";
+      if (!loading && !hold && !after) {
+        return null;
+      }
+      return { loading, hold, after };
+    }
+
+    async function fetchBootStatus() {
+      try {
+        const res = await fetch(STATUS_URL, { cache: "no-store" });
+        if (!res.ok) {
+          return null;
+        }
+        return normalizeBootStatus(await res.json());
+      } catch (e) {
+        console.warn("status.json unavailable", e);
+        return null;
+      }
+    }
+
+    function applyEarlyStatusMessage(status) {
+      const msg = document.getElementById("resilient-status-msg");
+      if (!msg) {
+        return;
+      }
+      if (status && status.hold) {
+        msg.textContent = status.hold;
+      } else if (status && status.loading) {
+        msg.textContent = status.loading;
+      } else {
+        msg.textContent = "";
+      }
+    }
+
+    async function waitWhileStatusHold() {
+      for (;;) {
+        const status = await fetchBootStatus();
+        window.__resilientBootStatus = status;
+        applyEarlyStatusMessage(status);
+        if (!status || !status.hold) {
+          return status;
+        }
+        await new Promise((resolve) => setTimeout(resolve, STATUS_HOLD_RECHECK_MS));
+      }
+    }
+
+    await waitWhileStatusHold();
+
     if (!window.__resilientDebugBoot && !window.__resilientVersionPinned) {
       try {
         const res = await fetch("/latest.json", { cache: "no-store" });

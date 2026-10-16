@@ -368,7 +368,7 @@ final class DoctorCommand extends ProjectCommand {
     }
 
     stdout.writeln('Server requirements:');
-    stdout.writeln('- /index.html and /latest.json: no-cache or no-store');
+    stdout.writeln('- /index.html, /latest.json, /status.json: no-cache or no-store');
     stdout.writeln('- /version/: immutable caching and byte-range support');
     stdout.writeln(
       '- Do not gzip already-created .gz files at the server layer',
@@ -392,6 +392,7 @@ final class PackageCommand extends ProjectCommand {
     'robots.txt',
     'sitemap.xml',
     'sitemap_index.xml',
+    'status.json',
   ];
 
   Future<void> run() async {

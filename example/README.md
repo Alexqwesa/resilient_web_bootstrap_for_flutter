@@ -47,6 +47,17 @@ Deploy `build/web_hardened`, not the raw `build/web` directory. The packaged
 tree keeps each release under `version/<build>/` and leaves root `index.html`
 and `latest.json` uncached so a new deploy does not mix files from two builds.
 
+Optional root `status.json` (also uncached) can show ops messages without a
+rebuild:
+
+```json
+{
+  "loading": "Note on the loading screen.",
+  "hold": "Pause boot until this field is cleared or the file is removed.",
+  "after": "Bottom-bar note after the app starts."
+}
+```
+
 `install` also writes `tool/build_resilient_web.sh` and
 `tool/build_resilient_web.ps1`, which run the Flutter build and the package
 step together:

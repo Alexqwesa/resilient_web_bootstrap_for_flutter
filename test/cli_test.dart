@@ -72,6 +72,10 @@ void main() {
       contains('<urlset'),
     );
     expect(
+      File(p.join(out.path, 'status.json')).readAsStringSync(),
+      contains('"hold"'),
+    );
+    expect(
       File(p.join(versionDir.path, 'main.dart.js.gz')).existsSync(),
       isTrue,
     );
@@ -90,6 +94,7 @@ void main() {
     final main = files.singleWhere((file) => file['path'] == 'main.dart.js');
     expect(files.any((file) => file['path'] == 'robots.txt'), isFalse);
     expect(files.any((file) => file['path'] == 'sitemap.xml'), isFalse);
+    expect(files.any((file) => file['path'] == 'status.json'), isFalse);
     expect(main['gzPath'], 'main.dart.js.gz');
     expect(
       main['gzSize'],
@@ -170,6 +175,9 @@ void _writeBuildOutput(Directory project) {
   File(p.join(root.path, 'robots.txt')).writeAsStringSync('User-agent: *\n');
   File(p.join(root.path, 'sitemap.xml')).writeAsStringSync(
     '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9"></urlset>',
+  );
+  File(p.join(root.path, 'status.json')).writeAsStringSync(
+    '{"loading":"","hold":"","after":""}\n',
   );
 
   final assets = Directory(p.join(root.path, 'assets'))

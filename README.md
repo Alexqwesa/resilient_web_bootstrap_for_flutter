@@ -53,6 +53,7 @@ Then it post-processes `flutter build web` output into a versioned layout:
 ```text
 index.html
 latest.json
+status.json       # optional ops messages; copied through when present in build/web
 robots.txt        # copied through when present in build/web
 sitemap.xml       # copied through when present in build/web
 version/<build>/
@@ -122,13 +123,39 @@ The default packaged output is `build/web_hardened`. Deploy that directory, not 
 `build/web` directory.
 
 Promotion should copy `version/<build>/` first and replace root `index.html` and
-`latest.json` last. Configure nginx so root `index.html`, `/`, and `latest.json`
-are not cached by nginx or the browser; immutable caching should only apply under
-`/version/`.
+`latest.json` last. Configure nginx so root `index.html`, `/`, `latest.json`, and
+`status.json` are not cached by nginx or the browser; immutable caching should
+only apply under `/version/`.
 
 Root crawler files from the Flutter build, such as `robots.txt`, `sitemap.xml`,
 and `sitemap_index.xml`, are copied to the packaged output root. They are not boot
-assets and are not listed in `latest.json`.
+assets and are not listed in `latest.json`. Optional root `status.json` is copied
+the same way when present in `web/` / `build/web`.
+
+## Ops status messages
+
+Deploy a mutable root file `/status.json` (same cache rules as `latest.json`) when
+you want operator-controlled boot messaging without rebuilding the Flutter app:
+
+```json
+{
+  "loading": "Optional note shown on the loading screen.",
+  "hold": "API is down. We are repairing it. The app will open when this clears.",
+  "after": "Optional note shown in the bottom bar after the app starts."
+}
+```
+
+- `loading`: shown on the early shell and CanvasKit preloader. Omit or leave empty
+  for the normal loader text only.
+- `hold`: non-empty value keeps the loading screen and does not start the app.
+  The bootstrap rechecks `/status.json` every 20 seconds. Delete the file, or clear
+  `hold`, to resume boot.
+- `after`: shown after `flutter-first-frame` on the existing bottom bar (notice
+  mode: text + dismiss, no progress). A real background version update replaces
+  the notice.
+
+Missing `/status.json` or a 404 is normal and means no ops messages. Values are
+shown as plain text, not HTML.
 
 ## Direct Version URLs
 
@@ -228,7 +255,7 @@ dart run resilient_web_bootstrap_for_flutter:resilient_bootstrap --project . uni
 
 Default setup does **not** need Content-Security-Policy. Caching and byte-range support are enough:
 
-- Serve `/index.html` and `/latest.json` with `no-cache` or `no-store`.
+- Serve `/index.html`, `/latest.json`, and `/status.json` with `no-cache` or `no-store`.
 - Serve `/robots.txt` and sitemap files from the output root when present.
 - Serve `/version/` files with immutable caching.
 - Preserve byte-range support for `/version/` files.
@@ -254,6 +281,11 @@ server {
   }
 
   location = /latest.json {
+    try_files $uri =404;
+    add_header Cache-Control "no-cache, must-revalidate" always;
+  }
+
+  location = /status.json {
     try_files $uri =404;
     add_header Cache-Control "no-cache, must-revalidate" always;
   }
@@ -288,7 +320,7 @@ This package currently needs:
   - `'wasm-unsafe-eval'`: Flutter CanvasKit / WebAssembly
 - `style-src 'self' 'unsafe-inline'`: inline loader styles
 - `worker-src 'self' blob:`: workers that may use blob URLs
-- `connect-src 'self'`: `fetch` for `latest.json` and `/version/` downloads
+- `connect-src 'self'`: `fetch` for `latest.json`, `status.json`, and `/version/` downloads
 - `img-src 'self' data:` and `font-src 'self' data:`: icons / Flutter assets
 
 Example policy string:

@@ -1,3 +1,9 @@
+## 0.1.2
+
+- Add root `/status.json` ops messages: `loading` on the boot screen, `hold`
+  to pause boot with a 20s recheck, and `after` on the bottom notice bar
+  (reuses the background-update bar; a real update replaces the notice).
+
 ## 0.1.1
 
 - Add `example/README.md` with the install-and-package workflow.

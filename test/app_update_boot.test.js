@@ -322,6 +322,7 @@ function makeHarness({
   versionPinned = false,
   pinnedManifest,
   rootLatestFails = false,
+  statusJson,
 } = {}) {
   const context = makeEventTarget();
   const blobStore = new Map();
@@ -528,8 +529,28 @@ _flutter.loader.load({
   const manifestByCall = latestManifests.slice();
   const embeddedBootManifest = bootManifest || pinnedManifest || latestManifests[0];
   const pinnedBootManifest = pinnedManifest || (versionPinned ? embeddedBootManifest : null);
+  const statusPayload =
+    statusJson === undefined
+      ? null
+      : statusJson;
   context.fetch = async function fetchMock(url) {
     const urlText = String(url);
+    if (urlText.endsWith('/status.json')) {
+      if (statusPayload == null) {
+        return {
+          ok: false,
+          status: 404,
+          json: async () => {
+            throw new Error('status unavailable');
+          },
+        };
+      }
+      return {
+        ok: true,
+        json: async () => statusPayload,
+      };
+    }
+
     if (urlText.includes('/version/') && urlText.endsWith('/latest.json')) {
       manifestCalls.push(urlText);
       return {
@@ -864,4 +885,47 @@ test('app_update starts sideload and downloads versioned gz files after first fr
     harness.cleanupCalls,
     ['/version/202605141111/flutter_bootstrap.js.gz'],
   );
+});
+
+test('app_update shows status.json after message on the bottom bar after first frame', async () => {
+  const harness = makeHarness({
+    latestManifests: [makeManifest('202605141110', '')],
+    statusJson: {
+      loading: 'Warming caches',
+      hold: '',
+      after: 'API maintenance finished. Continue working.',
+    },
+  });
+
+  await waitFor(() => harness.context.__RUN_APP_DONE === true);
+  await waitFor(() => {
+    const bar = harness.context.document.getElementById('background-update-bar');
+    return bar && bar.classList.contains('visible') && bar.classList.contains('notice');
+  });
+
+  const bar = harness.context.document.getElementById('background-update-bar');
+  const text = harness.context.document.getElementById('background-update-text');
+  assert.equal(bar.classList.contains('notice'), true);
+  assert.equal(text.textContent, 'API maintenance finished. Continue working.');
+});
+
+test('app_update replaces status notice when a background update starts', async () => {
+  const harness = makeHarness({
+    latestManifests: [
+      makeManifest('202605141110', ''),
+      makeManifest('202605141111', 'next/'),
+    ],
+    statusJson: {
+      after: 'Please save your work soon.',
+    },
+    runBackgroundTimers: true,
+  });
+
+  await waitFor(() => harness.downloadCalls.length >= 2);
+
+  const bar = harness.context.document.getElementById('background-update-bar');
+  const text = harness.context.document.getElementById('background-update-text');
+  assert.equal(bar.classList.contains('visible'), true);
+  assert.equal(bar.classList.contains('notice'), false);
+  assert.match(String(text.textContent || ''), /New version is loading|New version is ready|Background update/);
 });
