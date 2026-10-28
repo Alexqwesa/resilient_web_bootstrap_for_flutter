@@ -48,6 +48,11 @@ String renderTemplate(
   String? buildVersion,
 }) {
   var rendered = text
+      .replaceAll('__RESILIENT_BASE_PATH__', _jsStringSafe(config.basePath))
+      .replaceAll(
+        '__RESILIENT_VERSION_PATH__',
+        _jsStringSafe(config.releaseUrlRoot),
+      )
       .replaceAll('__RESILIENT_APP_TITLE__', _jsHtmlSafe(config.title))
       .replaceAll(
         '__RESILIENT_APP_DESCRIPTION__',

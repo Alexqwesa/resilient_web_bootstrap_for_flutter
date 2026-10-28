@@ -11,6 +11,8 @@
     //   /version/<build>/index.html - no updates
     (() => {
       const defaultBuildVersion = '__DEFAULT_BUILD_VERSION__';
+      const configuredBase = '__RESILIENT_BASE_PATH__';
+      const versionRoot = '__RESILIENT_VERSION_PATH__';
 
       function normalizeDir(path) {
         if (!path) {
@@ -21,8 +23,10 @@
 
       function detectVersionBase() {
         const path = window.location.pathname || '/';
-        const match = path.match(/^(.*\/version\/[^/?#]+)(?:\/|$)/);
-        return match ? normalizeDir(match[1]) : null;
+        const prefix = normalizeDir(versionRoot);
+        if (!path.startsWith(prefix)) return null;
+        const version = path.slice(prefix.length).split('/')[0];
+        return version ? normalizeDir(prefix + version) : null;
       }
 
       const versionBase = detectVersionBase();
@@ -32,13 +36,13 @@
       // that same version directory and make Flutter's base href that directory.
       // Otherwise this is root app mode: keep Flutter routes rooted at /, but
       // always load immutable build files from /version/<defaultBuildVersion>/.
-      const appBase = versionBase || '/';
+      const appBase = versionBase || configuredBase;
       // In Flutter web debug (`flutter run -d chrome`), `__DEFAULT_BUILD_VERSION__` is not
       // replaced and the dev server doesn't serve `/version/<build>/...` assets.
       // Fall back to the standard debug boot flow in that case.
       const assetBase = versionBase
         ? normalizeDir(versionBase)
-        : (isDebugDevServer ? '/' : normalizeDir(`/version/${defaultBuildVersion}`));
+        : (isDebugDevServer ? configuredBase : normalizeDir(`${versionRoot}/${defaultBuildVersion}`));
 
       const base = document.querySelector('base') || document.createElement('base');
       base.setAttribute('href', appBase);
@@ -46,7 +50,8 @@
         document.head.prepend(base);
       }
 
-      window.__resilientAppBase = appBase;
+      window.__resilientAppBase = configuredBase;
+      window.__resilientBootstrapScript = "flutter_bootstrap.js";
       window.__resilientAssetBase = assetBase;
       window.__resilientVersionPinned = !!versionBase;
       window.__resilientPinnedBuild = versionBase
@@ -290,7 +295,7 @@
 <script>
   // Root sideload: optional hardUpdate preflight (see app_update.js for cache discard + background reload).
   (async function resilientBoot() {
-    const STATUS_URL = "/status.json";
+    const STATUS_URL = new URL("status.json", window.location.origin + window.__resilientAppBase).href;
     const STATUS_HOLD_RECHECK_MS = 20_000;
 
     function normalizeBootStatus(data) {
@@ -349,12 +354,14 @@
 
     if (!window.__resilientDebugBoot && !window.__resilientVersionPinned) {
       try {
-        const res = await fetch("/latest.json", { cache: "no-store" });
+        const res = await fetch(new URL("latest.json", window.location.origin + window.__resilientAppBase), { cache: "no-store" });
         if (res.ok) {
           const latest = await res.json();
-          if (latest && latest.hardUpdate === true) {
-            localStorage.removeItem("flutter.lastGoodManifest");
-            localStorage.removeItem("flutter.nextManifest");
+          if (latest) {
+            if (latest.hardUpdate === true) {
+              localStorage.removeItem("flutter.lastGoodManifest");
+              localStorage.removeItem("flutter.nextManifest");
+            }
             if (latest.base) {
               const base = latest.base.endsWith("/") ? latest.base : `${latest.base}/`;
               window.__resilientAssetBase = base;
@@ -372,7 +379,8 @@
 
     if (window.__resilientDebugBoot) {
       const s = document.createElement("script");
-      s.src = "main.dart.js";
+      // The development server serves its own Dart debug entrypoint.
+      s.src = ["main", "dart", "js"].join(".");
       s.defer = true;
       document.body.appendChild(s);
       return;

@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:path/path.dart' as p;
+import 'package:resilient_web_bootstrap_for_flutter/src/deploy.dart';
 
 /// Builds real Flutter web deploy trees for Chrome e2e:
 /// - sites_flutter/before_apply
@@ -14,7 +15,9 @@ Future<void> main(List<String> args) async {
 
   final flutter = _resolveFlutter();
   if (flutter == null) {
-    stderr.writeln('Flutter SDK not found on PATH. Install Flutter to run this e2e.');
+    stderr.writeln(
+      'Flutter SDK not found on PATH. Install Flutter to run this e2e.',
+    );
     exitCode = 78; // EX_CONFIG
     return;
   }
@@ -56,16 +59,7 @@ Future<void> main(List<String> args) async {
     );
 
     _copyDirectory(beforeDir, afterDir);
-    _copyDirectory(
-      Directory(p.join(stagedAfter.path, 'version', 'after_apply')),
-      Directory(p.join(afterDir.path, 'version', 'after_apply')),
-    );
-    File(
-      p.join(stagedAfter.path, 'index.html'),
-    ).copySync(p.join(afterDir.path, 'index.html'));
-    File(
-      p.join(stagedAfter.path, 'latest.json'),
-    ).copySync(p.join(afterDir.path, 'latest.json'));
+    deployPackage(stagedAfter, afterDir);
     stagedAfter.deleteSync(recursive: true);
 
     File(p.join(outRoot.path, 'manifest.json')).writeAsStringSync(
@@ -94,7 +88,9 @@ Directory _findRepoRoot() {
     }
     final parent = dir.parent;
     if (parent.path == dir.path) {
-      throw StateError('Could not find package root from ${Directory.current.path}');
+      throw StateError(
+        'Could not find package root from ${Directory.current.path}',
+      );
     }
     dir = parent;
   }
@@ -157,6 +153,25 @@ void _writeAppSources(Directory project, Directory repoRoot) {
     p.join(project.path, 'lib', 'main.dart'),
   ).writeAsStringSync(fixtureMain.readAsStringSync());
 
+  final fixtureAssets = Directory(p.join(project.path, 'assets'))
+    ..createSync(recursive: true);
+  final png = base64Decode(
+    'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=',
+  );
+  File(p.join(fixtureAssets.path, 'probe.png')).writeAsBytesSync(png);
+  Directory(p.join(fixtureAssets.path, '2.0x')).createSync();
+  File(p.join(fixtureAssets.path, '2.0x', 'probe.png')).writeAsBytesSync(png);
+  File(
+    p.join(fixtureAssets.path, 'probe.json'),
+  ).writeAsStringSync('{"probe":true}');
+  final shaders = Directory(p.join(project.path, 'shaders'))..createSync();
+  File(p.join(shaders.path, 'probe.frag')).writeAsStringSync(r'''
+#include <flutter/runtime_effect.glsl>
+uniform vec2 uSize;
+out vec4 fragColor;
+void main() { fragColor = vec4(FlutterFragCoord().xy / uSize, 0.0, 1.0); }
+''');
+
   final posixPath = repoRoot.path.replaceAll(r'\', '/');
   File(p.join(project.path, 'pubspec.yaml')).writeAsStringSync('''
 name: e2e_chrome_flutter_app
@@ -180,6 +195,11 @@ dev_dependencies:
 
 flutter:
   uses-material-design: true
+  assets:
+    - assets/probe.png
+    - assets/probe.json
+  shaders:
+    - shaders/probe.frag
 ''');
 }
 
@@ -191,25 +211,15 @@ Future<void> _buildAndPackage({
   required Directory outDir,
   required bool hardUpdate,
 }) async {
-  await _run(flutter, [
+  await _runCli(project, repoRoot, [
     'build',
-    'web',
-    '--release',
+    if (Platform.environment['E2E_WEB_CONTENT_HASH'] == '0') '--no-web-content-hash',
+    if (Platform.environment['E2E_WASM'] == '1') '--wasm',
     '--dart-define=E2E_VERSION=$version',
-  ], cwd: project);
-
-  final packageArgs = <String>[
-    'package',
-    '--version',
-    version,
-    '--out',
-    outDir.path,
-    '--force',
-  ];
-  if (hardUpdate) {
-    packageArgs.add('--hard-update');
-  }
-  await _runCli(project, repoRoot, packageArgs);
+    '--version', version,
+    '--out', outDir.path,
+    if (hardUpdate) '--hard-update',
+  ]);
 }
 
 Future<void> _runCli(

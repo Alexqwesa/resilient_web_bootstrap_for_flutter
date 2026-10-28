@@ -323,6 +323,8 @@ function makeHarness({
   pinnedManifest,
   rootLatestFails = false,
   statusJson,
+  bootDownloadStatus,
+  recoveryVersion,
 } = {}) {
   const context = makeEventTarget();
   const blobStore = new Map();
@@ -418,6 +420,12 @@ function makeHarness({
       this._map.clear();
     },
   };
+  const sessionValues = new Map(recoveryVersion ? [['flutter.recoveryVersion', recoveryVersion]] : []);
+  context.sessionStorage = {
+    getItem: key => sessionValues.get(key) || null,
+    setItem: (key, value) => sessionValues.set(key, String(value)),
+    removeItem: key => sessionValues.delete(key),
+  };
   context.window = context;
   context.setTimeout = function setTimeoutMock(fn, ms) {
     const id = ++timeoutSeq;
@@ -484,6 +492,11 @@ _flutter.loader.load({
     },
     async downloadAndGunzipBootResource(url) {
       downloadCalls.push(url);
+      if (bootDownloadStatus) {
+        const error = new Error('boot transfer failed');
+        error.httpResponse = { status: bootDownloadStatus };
+        throw error;
+      }
       return {
         bytes: new Uint8Array(
           bootstrapSource.buffer.slice(
@@ -897,10 +910,9 @@ test('app_update starts sideload and downloads versioned gz files after first fr
     harness.downloadCalls.some(url => url.endsWith('/version/202605141111/next/app_update.js.gz')),
     false,
   );
-  assert.deepEqual(
-    harness.cleanupCalls,
-    ['/version/202605141111/flutter_bootstrap.js.gz'],
-  );
+  assert.deepEqual(harness.cleanupCalls, []);
+  assert.equal(JSON.parse(harness.context.localStorage.getItem('flutter.lastGoodManifest')).version, '202605141110');
+  assert.equal(JSON.parse(harness.context.localStorage.getItem('flutter.nextManifest')).version, '202605141111');
 });
 
 test('app_update shows status.json after message on the bottom bar after first frame', async () => {
@@ -944,4 +956,37 @@ test('app_update replaces status notice when a background update starts', async 
   assert.equal(bar.classList.contains('visible'), true);
   assert.equal(bar.classList.contains('notice'), false);
   assert.match(String(text.textContent || ''), /New version is loading|New version is ready|Background update/);
+});
+
+
+test('missing saved release triggers one recovery reload and preserves last-good until a frame', async () => {
+  const old = makeManifest('expired', '');
+  const latest = makeManifest('current', '');
+  const harness = makeHarness({latestManifests: [latest], savedManifest: old, bootDownloadStatus: 404});
+  await waitFor(() => harness.reloadCalls.length === 1);
+  assert.equal(harness.context.sessionStorage.getItem('flutter.recoveryVersion'), 'current');
+  assert.equal(JSON.parse(harness.context.localStorage.getItem('flutter.lastGoodManifest')).version, 'expired');
+  await harness.context.__resilientHandleBootError({httpResponse: {status: 410}});
+  assert.equal(harness.reloadCalls.length, 1);
+});
+
+test('temporary network errors never expire a saved release', async () => {
+  const old = makeManifest('offline_saved', '');
+  const latest = makeManifest('current', '');
+  const harness = makeHarness({latestManifests: [latest], savedManifest: old, bootDownloadStatus: 503});
+  await waitFor(() => harness.downloadCalls.length > 0);
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(harness.reloadCalls.length, 0);
+  assert.equal(JSON.parse(harness.context.localStorage.getItem('flutter.lastGoodManifest')).version, 'offline_saved');
+});
+
+test('recovery boot selects published release with its own asset configuration', async () => {
+  const old = makeManifest('expired', '');
+  const latest = {...makeManifest('current', ''), assetBase: '/simops/'};
+  const harness = makeHarness({latestManifests: [latest], savedManifest: old, recoveryVersion: 'current'});
+  await waitFor(() => harness.context.__RUN_APP_DONE === true);
+  assert.equal(harness.context.__FLUTTER_MANIFEST__.version, 'current');
+  assert.equal(harness.context.__FLUTTER_MANIFEST__.assetBase, '/simops/');
+  await waitFor(() => JSON.parse(harness.context.localStorage.getItem('flutter.lastGoodManifest')).version === 'current');
+  assert.equal(harness.context.sessionStorage.getItem('flutter.recoveryVersion'), null);
 });

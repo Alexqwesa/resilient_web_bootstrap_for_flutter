@@ -34,6 +34,15 @@ operations dashboards, and other long-running Flutter Web applications.
 - Cache-repair and cleanup pages
 - Dart CLI for installation, validation, and build packaging
 
+## Requirements
+
+- **Flutter 3.50+** for the default production workflow. Release builds use
+  Flutter's native `--web-content-hash`, which older SDKs do not have; the build
+  stops with an explicit error on an older SDK.
+- Older Flutter SDKs work only in legacy mode (`--no-web-content-hash`): assets stay
+  inside each release directory and are not shared between releases.
+- Cleanup and deploy helpers need only Dart (or a compiled executable), not Flutter.
+
 ## Tradeoffs
 
 | Choice | Why it helps                                                                                           | What you need to know                                                    |
@@ -122,14 +131,16 @@ dart run resilient_web_bootstrap_for_flutter:resilient_bootstrap --project . pac
 The default packaged output is `build/web_hardened`. Deploy that directory, not the raw
 `build/web` directory.
 
-Each release includes its own complete `assets/` directory. `package --force`
+Legacy releases include their own complete `assets/` directory. Native content-hashed
+releases use the shared root `assets/` directory. `package --force`
 updates root files while preserving existing releases; duplicate version IDs
-are rejected. Packaging does not automatically clean up old releases.
+are rejected. Packaging does not automatically clean up old releases unless `--cleanup` is supplied.
 
 Promotion should copy `version/<build>/` first and replace root `index.html` and
 `latest.json` last. Configure nginx so root `index.html`, `/`, `latest.json`, and
 `status.json` are not cached by nginx or the browser; immutable caching should
-only apply under `/version/`.
+apply to shared hashed `/assets/` files and immutable release resources.
+Pinned HTML/manifests and bundled CanvasKit resources should revalidate.
 
 Root crawler files from the Flutter build, such as `robots.txt`, `sitemap.xml`,
 and `sitemap_index.xml`, are copied to the packaged output root. They are not boot
@@ -160,6 +171,123 @@ you want operator-controlled boot messaging without rebuilding the Flutter app:
 
 Missing `/status.json` or a 404 is normal and means no ops messages. Values are
 shown as plain text, not HTML.
+
+## Native Content Hashing And Shared Assets
+
+Generated build scripts use Flutter 3.50+ native `--web-content-hash` for release
+builds. They check SDK compatibility before building. Use
+`--no-web-content-hash` with an older SDK. Debug/profile builds keep Flutter's
+normal filenames by default; `flutter run` is unchanged. Deferred-import output
+is rejected with hashing enabled; use the legacy option for those builds.
+All other Flutter arguments retain their original argument boundaries.
+
+```bash
+sh tool/build_resilient_web.sh --dart-define='APP_LABEL=My App'
+sh tool/build_resilient_web.sh --no-web-content-hash
+```
+
+```powershell
+.\tool\build_resilient_web.ps1 --web-content-hash
+```
+
+Packaging validates Flutter's `precache_manifest.json` (`version: 1`, `entries`
+with `url`, `hash`, `size`, `urlHashed`). Flutter owns naming and runtime mapping.
+Every physical hashed file under `assets/` is copied to the common root with
+its original relative path. Identical existing files are reused after full
+SHA-256 verification. A filename collision with different bytes fails packaging.
+Different logical paths remain separate even when their contents match.
+The compiled Flutter bootstrap and its injected build configuration are preserved.
+
+```text
+web_hardened/
+  index.html
+  latest.json
+  assets/                         # append-only during deployment
+  version/<id>/
+    index.html
+    latest.json                   # base for code, assetBase for Flutter assets
+    asset_refs.json               # exact physical shared paths; server use only
+    flutter_bootstrap.js
+    <Flutter-generated entrypoints and gzip copies>
+```
+
+New manifests include UTC `createdAt`, `base`, `assetBase`, and entrypoint names.
+For a subpath, set `bootstrap.basePath: "/simops/"` before `install` and build
+with Flutter's `--base-href /simops/`. `bootstrap.versionPath` is relative to this
+app base (default `/version`). Publish the output directory at `/simops/`.
+
+Builds without a native inventory remain release-local and are reported as legacy.
+Published old releases are never rewritten or migrated. Pinned pages load their
+own manifest. Root startup recovers from a deleted remembered release only on a
+proven HTTP 404/410, with a bounded retry; temporary failures retain cached state.
+A release becomes last-good only after Flutter paints its first frame.
+
+## Deployment And Retention
+
+Packaging stages a new release before publishing root pointers and refuses
+repeated release IDs even with `--force`. Existing releases and shared files
+survive incremental builds. To deploy to a filesystem destination safely:
+
+```bash
+dart run resilient_web_bootstrap_for_flutter:resilient_bootstrap deploy --dest /srv/www/app
+```
+
+```powershell
+dart run resilient_web_bootstrap_for_flutter:resilient_bootstrap deploy --dest C:\inetpub\wwwroot\app
+```
+
+The helper validates boot dependencies, merges immutable shared files, copies the
+release, and replaces root manifest/HTML last using same-directory renames.
+It does not delete destination files or implicitly run cleanup. For manual copies,
+merge `assets/` first, then `version/<id>/`, then root crawler/status files and
+finally `latest.json` and `index.html`. Do not use deletion-based mirrors such as
+`rsync --delete` or `robocopy /MIR`. Coordinate manual copying and cleanup so they
+cannot overlap. Helper commands share an exclusive `.resilient-deploy.lock`.
+After an interrupted operation, inspect the deployment before removing a stale lock.
+
+Cleanup previews by default and reports retained, deleted, and skipped paths and
+byte sizes. It keeps the current root/embedded release, at least three recent
+releases, releases younger than 90 days, unknown-age releases, and any explicit
+rollback protection. All retained references are marked before asset sweeping.
+Unreferenced files are eligible only after their modification time passes the
+asset grace period. Missing/malformed retained dependency metadata blocks shared
+asset deletion. Legacy whole-bundle donors are protected while referenced.
+Expired legacy releases eventually expire as a unit; no migration is required.
+
+```yaml
+cleanup:
+  enabled: true
+  keepDays: 90
+  keepReleases: 3
+  assetGraceDays: 90
+  collectAssets: true
+```
+
+```bash
+dart run resilient_web_bootstrap_for_flutter:resilient_bootstrap cleanup --root /srv/www/app --keep-days 90 --dry-run
+dart run resilient_web_bootstrap_for_flutter:resilient_bootstrap cleanup --root /srv/www/app --keep-months 2 --protect rollback-id --apply
+# Disable shared asset GC while still expiring release directories:
+dart run resilient_web_bootstrap_for_flutter:resilient_bootstrap cleanup --root /srv/www/app --no-assets --apply
+```
+
+Use `--versions releases` for a custom physical version directory.
+`package --cleanup` opts into applying YAML retention after successful publication;
+`cleanup.enabled: false` disables that automatic step. Explicit cleanup commands
+remain available. Maintenance never depends on local build output.
+
+For a server with neither Flutter nor Dart, compile a standalone executable on a
+machine with the matching OS/architecture, and keep it outside the public root:
+
+```bash
+dart compile exe bin/resilient_cleanup.dart -o build/resilient_cleanup
+./build/resilient_cleanup --root /srv/www/app --dry-run
+./build/resilient_cleanup --root /srv/www/app --apply
+```
+
+On Windows use `-o build/resilient_cleanup.exe`. No Python runtime is required.
+A finite retention period cannot protect an indefinitely open browser tab from
+later asset requests. Extend retention/grace periods or disable asset GC for those
+workloads. Preserve old deployments until returning clients have upgraded.
 
 ## Direct Version URLs
 
@@ -220,6 +348,8 @@ loader label, or token message type. `hardUpdate` affects packaging only.
 ```bash
 resilient_bootstrap --project . install [--force]
 resilient_bootstrap --project . package [--build-dir build/web] [--out build/web_hardened] [--version <id>] [--hard-update] [--force]
+resilient_bootstrap --project . cleanup [--root <deploy-dir>] [--dry-run | --apply]
+resilient_bootstrap --project . deploy --dest <directory>
 resilient_bootstrap --project . doctor
 resilient_bootstrap --project . uninstall [--restore-backup]
 ```
@@ -232,6 +362,8 @@ The generated build scripts accept:
 
 ```bash
 --hard-update
+--web-content-hash / --no-web-content-hash
+--cleanup / --no-cleanup
 --version <id>
 --out <dir>
 --build-dir <dir>
@@ -261,7 +393,10 @@ Default setup does **not** need Content-Security-Policy. Caching and byte-range 
 
 - Serve `/index.html`, `/latest.json`, and `/status.json` with `no-cache` or `no-store`.
 - Serve `/robots.txt` and sitemap files from the output root when present.
-- Serve `/version/` files with immutable caching.
+- Serve hashed `/assets/` and release code with immutable caching.
+- Revalidate pinned HTML/manifests and bundled CanvasKit files.
+- Return real 404s for missing assets and entrypoints; exclude them from SPA fallbacks.
+- Include MIME mappings for JS/MJS, WASM, JSON, PNG, TTF, and OTF.
 - Preserve byte-range support for `/version/` files.
 - Do not server-gzip the generated `.gz` files again.
 
@@ -271,9 +406,25 @@ Example nginx shape (no CSP):
 server {
   # Other server config: listen, server_name, root, TLS, etc.
 
-  location ^~ /version/ {
+  # Include your server's standard mime.types (including mjs/wasm/font types).
+  location ^~ /assets/ {
     try_files $uri =404;
-    add_header Cache-Control "public, max-age=31536000, immutable" always;
+    add_header Cache-Control "public, max-age=31536000, immutable";
+  }
+
+  location ~ ^/version/[^/]+/(index\.html|latest\.json)$ {
+    try_files $uri =404;
+    add_header Cache-Control "no-cache, must-revalidate";
+  }
+
+  location ~ ^/version/[^/]+/canvaskit/ {
+    try_files $uri =404;
+    add_header Cache-Control "no-cache, must-revalidate";
+  }
+
+  location /version/ {
+    try_files $uri =404;
+    add_header Cache-Control "public, max-age=31536000, immutable";
     add_header Accept-Ranges "bytes" always;
     gzip off;
     gzip_static off;
@@ -348,7 +499,7 @@ location = /index.html {
 # /version/<build>/index.html
 location ~ ^/version/[^/]+/index\.html$ {
   try_files $uri =404;
-  add_header Cache-Control "public, max-age=31536000, immutable" always;
+  add_header Cache-Control "no-cache, must-revalidate";
   add_header Content-Security-Policy $resilient_bootstrap_csp always;
 }
 ```
@@ -381,7 +532,7 @@ npx playwright install chromium
 node --test e2e_chrome.test.mjs
 ```
 
-**Real Flutter app** (runs `flutter create` + `flutter build web` twice; slower):
+**Real Flutter 3.50+ content-hashed app** (runs `flutter create` + `flutter build web` twice; slower):
 
 ```bash
 cd test/e2e_chrome
@@ -389,6 +540,12 @@ npm install
 npx playwright install chromium
 node --test e2e_chrome_flutter.test.mjs
 ```
+
+Without Flutter 3.50+, the test runs a legacy build and reports the shared-asset
+check as skipped. Set `E2E_WEB_CONTENT_HASH=1` to require content hashing (fails on
+older SDKs) or `E2E_WEB_CONTENT_HASH=0` to force the legacy build.
+The real fixture exercises rootBundle, Image.asset, variants, native manifests,
+Material fonts, and a shader.
 
 The Flutter e2e sets `window.__E2E_FLUTTER_VERSION__` / `data-e2e-flutter` from Dart
 (CanvasKit text is not in the DOM). You should see a real Flutter screen, not the

@@ -19,10 +19,25 @@ function hasFlutter() {
   return probe.status === 0 && String(probe.stdout || '').trim().length > 0;
 }
 
+// Ask the SDK itself: the flag only exists on SDKs with native content hashing.
+function supportsWebContentHash() {
+  const probe = spawnSync('flutter', ['build', 'web', '-h'], {shell: true, encoding: 'utf8'});
+  return probe.status === 0 && String(probe.stdout || '').includes('web-content-hash');
+}
+
+// E2E_WEB_CONTENT_HASH: '0' forces legacy, '1' forces hashing, unset follows SDK support.
+function resolveContentHash() {
+  const env = process.env.E2E_WEB_CONTENT_HASH;
+  if (env === '0') return {hashed: false, reason: 'disabled by E2E_WEB_CONTENT_HASH=0'};
+  if (env === '1' || supportsWebContentHash()) return {hashed: true};
+  return {hashed: false, reason: 'Flutter SDK lacks --web-content-hash (needs 3.50+); ran legacy build'};
+}
+
 function run(command, args, options = {}) {
   return new Promise((resolve, reject) => {
     const child = spawn(command, args, {
       cwd: options.cwd || repoRoot,
+      env: {...process.env, ...options.env},
       stdio: ['ignore', 'pipe', 'pipe'],
       shell: process.platform === 'win32',
     });
@@ -49,14 +64,24 @@ function run(command, args, options = {}) {
   });
 }
 
-async function prepareSites() {
+async function prepareSites(t, contentHash) {
   await run(
     'dart',
     ['run', 'test/e2e_chrome/prepare_sites_flutter.dart', sitesRoot],
-    { cwd: repoRoot },
+    { cwd: repoRoot, env: {E2E_WEB_CONTENT_HASH: contentHash.hashed ? '1' : '0'} },
   );
   assert.ok(fs.existsSync(path.join(sitesRoot, 'before_apply', 'latest.json')));
   assert.ok(fs.existsSync(path.join(sitesRoot, 'after_apply', 'latest.json')));
+  await t.test('real builds share native content-hashed assets', {skip: contentHash.reason ?? false}, () => {
+    const root = path.join(sitesRoot, 'after_apply');
+    const refs = id => JSON.parse(fs.readFileSync(path.join(root, 'version', id, 'asset_refs.json'), 'utf8')).assets;
+    const a = refs('before_apply');
+    const b = refs('after_apply');
+    assert.ok(a.some(asset => b.includes(asset)), 'real builds must share unchanged asset URLs');
+    const files = fs.readdirSync(path.join(root, 'assets'), {recursive: true, withFileTypes: true}).filter(entry => entry.isFile());
+    assert.equal(files.length, new Set([...a, ...b]).size);
+    for (const id of ['before_apply', 'after_apply']) assert.equal(fs.existsSync(path.join(root, 'version', id, 'assets')), false);
+  });
 }
 
 async function waitForFlutterVersion(page, version, timeoutMs = 120000) {
@@ -77,7 +102,7 @@ test(
   'chrome e2e (real Flutter): before_apply loads, after_apply hard-update boots new version',
   { skip: flutterAvailable ? false : 'Flutter SDK not found on PATH' },
   async (t) => {
-    await prepareSites();
+    await prepareSites(t, resolveContentHash());
 
     const site = { rootDir: path.join(sitesRoot, 'before_apply') };
     const server = await startMutableStaticServer(site);
@@ -104,11 +129,17 @@ test(
       }
     });
 
+    const failedAssets = [];
+    page.on('response', response => {
+      if (response.status() >= 400 && /\/assets\//.test(response.url())) failedAssets.push(response.url());
+    });
     await page.goto(`${server.origin}/index.html`, {
       waitUntil: 'domcontentloaded',
     });
     try {
       await waitForFlutterVersion(page, 'before_apply');
+      assert.equal(await page.getAttribute('html', 'data-e2e-assets'), 'ready');
+      assert.deepEqual(failedAssets, []);
     } catch (error) {
       const debug = await page.evaluate(() => ({
         title: document.title,
@@ -162,6 +193,21 @@ test(
     });
     await waitForFlutterVersion(page, 'before_apply');
     assert.equal(await page.evaluate(() => window.__resilientVersionPinned), true);
+
+    // A returning browser can remember a release that no longer exists.
+    const rootManifestPath = path.join(sitesRoot, 'after_apply', 'latest.json');
+    const rootManifest = JSON.parse(fs.readFileSync(rootManifestPath, 'utf8'));
+    delete rootManifest.hardUpdate;
+    fs.writeFileSync(rootManifestPath, JSON.stringify(rootManifest));
+    await page.evaluate(manifest => {
+      localStorage.setItem('flutter.lastGoodManifest', JSON.stringify({...manifest, version: 'expired', base: '/version/expired/'}));
+      localStorage.removeItem('flutter.nextManifest');
+    }, rootManifest);
+    await page.goto(`${server.origin}/index.html`, {waitUntil: 'domcontentloaded'});
+    await waitForFlutterVersion(page, 'after_apply');
+    await page.waitForFunction(() => JSON.parse(localStorage.getItem('flutter.lastGoodManifest') || '{}').version === 'after_apply');
+    assert.equal(await page.evaluate(() => sessionStorage.getItem('flutter.recoveryVersion')), null);
+    assert.deepEqual(failedAssets, []);
 
     const fatal = consoleErrors.filter((line) => {
       const text = String(line);

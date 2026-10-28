@@ -6,6 +6,11 @@ import 'package:args/args.dart';
 import 'package:path/path.dart' as p;
 
 import 'config.dart';
+import 'assets.dart';
+import 'deployment_io.dart';
+import 'deploy_cleanup.dart';
+import 'build.dart';
+import 'deploy.dart';
 import 'hashing.dart';
 import 'templates.dart';
 
@@ -42,6 +47,20 @@ final class ResilientBootstrapCli {
 
     try {
       switch (results.command!.name) {
+        case 'build':
+          await buildWeb(projectRoot, results.command!.rest);
+        case 'cleanup':
+          CleanupCommand(projectRoot, results.command!).run();
+        case 'deploy':
+          deployPackage(
+            Directory(
+              p.absolute(
+                projectRoot.path,
+                results.command!['source'] as String,
+              ),
+            ),
+            Directory(p.absolute(results.command!['dest'] as String)),
+          );
         case 'install':
           await InstallCommand(projectRoot, results.command!).run();
         case 'uninstall':
@@ -84,6 +103,12 @@ final class ResilientBootstrapCli {
     parser.addCommand(
       'package',
       ArgParser()
+        ..addFlag(
+          'cleanup',
+          defaultsTo: false,
+          help:
+              'Apply configured retention after publication (off by default).',
+        )
         ..addOption(
           'build-dir',
           defaultsTo: p.join('build', 'web'),
@@ -109,6 +134,27 @@ final class ResilientBootstrapCli {
           help:
               'Update root files in an existing output, preserving immutable releases.',
         ),
+    );
+    parser.addCommand('build', ArgParser.allowAnything());
+    parser.addCommand(
+      'cleanup',
+      ArgParser()
+        ..addOption('root', defaultsTo: 'build/web_hardened')
+        ..addOption('versions', defaultsTo: 'version')
+        ..addOption('keep-days')
+        ..addOption('keep-months')
+        ..addOption('keep-releases')
+        ..addOption('asset-grace-days')
+        ..addMultiOption('protect')
+        ..addFlag('assets', defaultsTo: true)
+        ..addFlag('dry-run', negatable: false)
+        ..addFlag('apply', negatable: false),
+    );
+    parser.addCommand(
+      'deploy',
+      ArgParser()
+        ..addOption('source', defaultsTo: 'build/web_hardened')
+        ..addOption('dest', mandatory: true),
     );
     parser.addCommand('doctor', ArgParser());
     return parser;
@@ -439,27 +485,138 @@ final class PackageCommand extends ProjectCommand {
       );
     }
 
-    versionDir.createSync(recursive: true);
-    _copyDirectory(buildDir, versionDir, overwrite: true);
-    await _copyRuntimeOverlay(config, versionDir);
-    _copyRootPassthroughFiles(buildDir, outRoot);
-    _gzipBootFiles(versionDir);
-
-    final manifest = _buildManifest(
-      config: config,
-      version: version,
-      versionDir: versionDir,
-      hardUpdate: results['hard-update'] == true || config.hardUpdate,
-    );
-    manifest['createdAt'] = DateTime.now().toUtc().toIso8601String();
-
-    _writeManifest(manifest, File(p.join(outRoot.path, 'latest.json')));
-    _writeManifest(manifest, File(p.join(versionDir.path, 'latest.json')));
-    await _writeIndexShell(config, version, outRoot, versionDir);
-    stdout.writeln('Packaged hardened Flutter web app.');
-    stdout.writeln('Output: ${outRoot.path}');
-    stdout.writeln('Versioned app: ${versionDir.path}');
+    validateRelativePath(versionRootName);
+    if (!config.basePath.startsWith('/') || !config.basePath.endsWith('/')) {
+      throw ArgumentError('bootstrap.basePath must start and end with /');
+    }
+    if (p.isWithin(buildDir.path, outRoot.path) ||
+        p.isWithin(outRoot.path, buildDir.path)) {
+      throw StateError(
+        'Build and output directories must not contain each other.',
+      );
+    }
+    final assets = readHashedAssets(buildDir);
+    for (final entity in buildDir.listSync(
+      recursive: true,
+      followLinks: false,
+    )) {
+      if (entity is Link) throw StateError('Symlink in build: ${entity.path}');
+      if (assets != null &&
+          RegExp(r'\.part\.(js|wasm)$').hasMatch(entity.path)) {
+        throw StateError(
+          'Native content hashing does not support deferred-import builds. Use --no-web-content-hash.',
+        );
+      }
+    }
+    final lock = DeploymentLock(outRoot);
+    Directory? staging;
+    try {
+      safeFile(outRoot, '$versionRootName/$version/latest.json');
+      if (versionDir.existsSync()) {
+        throw StateError('Version $version already exists.');
+      }
+      staging = outRoot.createTempSync('.staging-');
+      final stagedRelease = Directory(p.join(staging.path, 'release'));
+      copyTree(buildDir, stagedRelease);
+      await _copyRuntimeOverlay(config, stagedRelease);
+      final bootstrap = File(
+        p.join(stagedRelease.path, 'flutter_bootstrap.js'),
+      );
+      if (!bootstrap.existsSync() ||
+          bootstrap.readAsStringSync().contains('{{flutter_')) {
+        throw StateError(
+          'Missing or unprocessed flutter_bootstrap.js. Run flutter build web first.',
+        );
+      }
+      final entrypoints = readBuildEntrypoints(bootstrap.readAsStringSync());
+      if (entrypoints.isEmpty) {
+        for (final file in stagedRelease.listSync().whereType<File>()) {
+          if (RegExp(
+            r'^main.*\.(js|mjs|wasm)$',
+          ).hasMatch(p.basename(file.path))) {
+            entrypoints.add(p.basename(file.path));
+          }
+        }
+      }
+      if (entrypoints.isEmpty) {
+        throw StateError('No compiled application entrypoint found.');
+      }
+      for (final path in entrypoints) {
+        if (!safeFile(stagedRelease, path).existsSync()) {
+          throw StateError('Missing compiled entrypoint: $path');
+        }
+      }
+      _entrypoints = entrypoints;
+      if (assets != null) {
+        File(
+          p.join(stagedRelease.path, 'asset_refs.json'),
+        ).writeAsStringSync(jsonEncode({'version': 1, 'assets': assets}));
+        // Stage shared files separately; release code will never contain assets/.
+        copyTree(
+          Directory(p.join(stagedRelease.path, 'assets')),
+          Directory(p.join(staging.path, 'assets')),
+        );
+        Directory(
+          p.join(stagedRelease.path, 'assets'),
+        ).deleteSync(recursive: true);
+      }
+      _gzipBootFiles(stagedRelease);
+      final manifest = _buildManifest(
+        config: config,
+        version: version,
+        versionDir: stagedRelease,
+        hardUpdate: results['hard-update'] == true || config.hardUpdate,
+      );
+      manifest['releasePath'] = '$versionRootName/$version/';
+      manifest['appBase'] = config.basePath;
+      manifest['createdAt'] = DateTime.now().toUtc().toIso8601String();
+      manifest['assetBase'] = assets == null
+          ? manifest['base']
+          : config.basePath;
+      manifest['entrypoints'] = entrypoints.toList()..sort();
+      _writeManifest(manifest, File(p.join(stagedRelease.path, 'latest.json')));
+      await _writeIndexShell(config, version, staging, stagedRelease);
+      if (assets != null) publishSharedAssets(staging, outRoot, assets);
+      versionDir.parent.createSync(recursive: true);
+      stagedRelease.renameSync(versionDir.path);
+      validateRelease(outRoot, manifest, '$versionRootName/$version/');
+      // Dependencies and immutable release are complete before mutable publication.
+      _copyRootPassthroughFiles(buildDir, outRoot);
+      atomicWrite(safeFile(outRoot, 'latest.json'), jsonEncode(manifest));
+      atomicWrite(
+        safeFile(outRoot, 'index.html'),
+        File(p.join(staging.path, 'index.html')).readAsStringSync(),
+      );
+      stdout.writeln('Packaged hardened Flutter web app.');
+      stdout.writeln('Output: ${outRoot.path}');
+      stdout.writeln('Versioned app: ${versionDir.path}');
+      stdout.writeln(
+        assets == null
+            ? 'Legacy build without native content hashing; assets remain release-local.'
+            : 'Shared ${assets.length} native content-hashed assets.',
+      );
+    } finally {
+      if (staging != null && staging.existsSync()) {
+        staging.deleteSync(recursive: true);
+      }
+      lock.release();
+    }
+    if (results['cleanup'] == true && config.cleanupEnabled) {
+      for (final entry in cleanupDeployment(
+        root: outRoot,
+        versionDirectory: versionRootName,
+        keepDays: config.keepDays,
+        keepReleases: config.keepReleases,
+        assetGraceDays: config.assetGraceDays,
+        collectAssets: config.collectAssets,
+        apply: true,
+      )) {
+        stdout.writeln(entry);
+      }
+    }
   }
+
+  Set<String> _entrypoints = {};
 
   String _projectPath(String value) {
     return p.normalize(
@@ -496,7 +653,7 @@ final class PackageCommand extends ProjectCommand {
       if (!source.existsSync()) {
         continue;
       }
-      _copyFile(source, File(p.join(outRoot.path, fileName)));
+      atomicWrite(safeFile(outRoot, fileName), source.readAsStringSync());
     }
   }
 
@@ -524,7 +681,7 @@ final class PackageCommand extends ProjectCommand {
 
     final manifest = <String, Object?>{
       'version': version,
-      'base': '${config.versionPath.replaceAll(RegExp(r'/+$'), '')}/$version/',
+      'base': '${config.releaseUrlRoot}/$version/',
       'files': files,
     };
     if (hardUpdate) {
@@ -545,12 +702,17 @@ final class PackageCommand extends ProjectCommand {
     Directory outRoot,
     Directory versionDir,
   ) async {
-    final source = File(p.join(webDir.path, 'index.html'));
+    final builtIndex = File(
+      p.join(_projectPath(results['build-dir'] as String), 'index.html'),
+    );
+    final source = builtIndex.existsSync()
+        ? builtIndex
+        : File(p.join(webDir.path, 'index.html'));
     final template = source.existsSync()
         ? source.readAsStringSync()
         : await readTemplate('index.html');
     final rendered = renderTemplate(
-      template.replaceAll(r'$FLUTTER_BASE_HREF', '/'),
+      template.replaceAll(r'$FLUTTER_BASE_HREF', config.basePath),
       config,
       buildVersion: version,
     );
@@ -569,7 +731,8 @@ final class PackageCommand extends ProjectCommand {
       if (relativePath.split('/').any((part) => part.startsWith('.'))) {
         return false;
       }
-      return _bootFilePatterns.any((pattern) => pattern.hasMatch(relativePath));
+      return _entrypoints.contains(relativePath) ||
+          _bootFilePatterns.any((pattern) => pattern.hasMatch(relativePath));
     }).toList()..sort((a, b) => a.path.compareTo(b.path));
     return files;
   }
@@ -631,132 +794,75 @@ final class _ManagedScript {
 
 const _powerShellBuildScript = r'''
 $ErrorActionPreference = "Stop"
-
-$hardUpdate = $false
-$version = $null
-$flutterArgs = @("--release")
-$packageArgs = @("--force")
-
-for ($i = 0; $i -lt $args.Count; $i++) {
-    $arg = $args[$i]
-    switch ($arg) {
-        "--hard-update" {
-            $hardUpdate = $true
-        }
-        "--version" {
-            if ($i + 1 -ge $args.Count) {
-                throw "--version requires a value"
-            }
-            $i++
-            $version = $args[$i]
-        }
-        "--profile" {
-            $flutterArgs = @("--profile")
-        }
-        "--debug" {
-            $flutterArgs = @("--debug")
-        }
-        "--out" {
-            if ($i + 1 -ge $args.Count) {
-                throw "--out requires a value"
-            }
-            $i++
-            $packageArgs += @("--out", $args[$i])
-        }
-        "--build-dir" {
-            if ($i + 1 -ge $args.Count) {
-                throw "--build-dir requires a value"
-            }
-            $i++
-            $packageArgs += @("--build-dir", $args[$i])
-        }
-        default {
-            $flutterArgs += $arg
-        }
-    }
-}
-
-if (-not $version) {
-    $version = Get-Date -Format "yyyyMMddHHmmss"
-}
-
-Write-Host "Building Flutter web..."
-flutter build web @flutterArgs
-
-$packageArgs += @("--version", $version)
-if ($hardUpdate) {
-    $packageArgs += "--hard-update"
-}
-
-Write-Host "Packaging hardened web build version $version..."
-dart run resilient_web_bootstrap_for_flutter:resilient_bootstrap --project . package @packageArgs
+dart run resilient_web_bootstrap_for_flutter:resilient_bootstrap --project . build @args
+if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 ''';
 
 const _shellBuildScript = r'''
 #!/usr/bin/env sh
 set -eu
-
-hard_update=0
-version=""
-flutter_args="--release"
-package_args="--force"
-
-while [ "$#" -gt 0 ]; do
-  case "$1" in
-    --hard-update)
-      hard_update=1
-      shift
-      ;;
-    --version)
-      if [ "$#" -lt 2 ]; then
-        echo "--version requires a value" >&2
-        exit 64
-      fi
-      version="$2"
-      shift 2
-      ;;
-    --profile)
-      flutter_args="--profile"
-      shift
-      ;;
-    --debug)
-      flutter_args="--debug"
-      shift
-      ;;
-    --out)
-      if [ "$#" -lt 2 ]; then
-        echo "--out requires a value" >&2
-        exit 64
-      fi
-      package_args="$package_args --out $2"
-      shift 2
-      ;;
-    --build-dir)
-      if [ "$#" -lt 2 ]; then
-        echo "--build-dir requires a value" >&2
-        exit 64
-      fi
-      package_args="$package_args --build-dir $2"
-      shift 2
-      ;;
-    *)
-      flutter_args="$flutter_args $1"
-      shift
-      ;;
-  esac
-done
-
-if [ -z "$version" ]; then
-  version="$(date +%Y%m%d%H%M%S)"
-fi
-
-echo "Building Flutter web..."
-flutter build web $flutter_args
-
-if [ "$hard_update" -eq 1 ]; then
-  package_args="$package_args --hard-update"
-fi
-
-echo "Packaging hardened web build version $version..."
-dart run resilient_web_bootstrap_for_flutter:resilient_bootstrap --project . package $package_args --version "$version"
+exec dart run resilient_web_bootstrap_for_flutter:resilient_bootstrap --project . build "$@"
 ''';
+
+Set<String> readBuildEntrypoints(String bootstrap) {
+  final match = RegExp(
+    r'_flutter\.buildConfig\s*=\s*(\{.*?\})\s*;',
+    dotAll: true,
+  ).firstMatch(bootstrap);
+  if (match == null) return {};
+  final data = jsonDecode(match[1]!);
+  if (data is! Map || data['builds'] is! List) {
+    throw const FormatException('Invalid Flutter build config');
+  }
+  final paths = <String>{};
+  for (final build in data['builds'] as List) {
+    if (build is! Map) continue;
+    for (final key in ['mainJsPath', 'mainWasmPath', 'jsSupportRuntimePath']) {
+      final path = build[key];
+      if (path is String) {
+        validateRelativePath(path);
+        paths.add(path);
+      }
+    }
+  }
+  return paths;
+}
+
+final class CleanupCommand extends ProjectCommand {
+  CleanupCommand(super.projectRoot, super.results);
+  void run() {
+    if (results['apply'] == true && results['dry-run'] == true) {
+      throw ArgumentError('Use --dry-run or --apply');
+    }
+    if (results['keep-months'] != null && results['keep-days'] != null) {
+      throw ArgumentError('Use --keep-months or --keep-days');
+    }
+    final config = loadConfig();
+    int integer(String key, int fallback) =>
+        int.parse(results[key] as String? ?? '$fallback');
+    final root = Directory(
+      p.absolute(projectRoot.path, results['root'] as String),
+    );
+    final entries = cleanupDeployment(
+      root: root,
+      versionDirectory: results['versions'] as String,
+      keepDays: integer('keep-days', config.keepDays),
+      keepMonths: results['keep-months'] == null
+          ? null
+          : int.parse(results['keep-months'] as String),
+      keepReleases: integer('keep-releases', config.keepReleases),
+      assetGraceDays: integer('asset-grace-days', config.assetGraceDays),
+      collectAssets: results['assets'] == true && config.collectAssets,
+      protectedVersions: (results['protect'] as List<String>).toSet(),
+      apply: results['apply'] == true,
+    );
+    stdout.writeln(
+      results['apply'] == true
+          ? 'Cleanup applied.'
+          : 'Preview only; use --apply to delete.',
+    );
+    for (final entry in entries) {
+      stdout.writeln(entry);
+    }
+  }
+}

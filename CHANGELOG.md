@@ -1,3 +1,12 @@
+## 0.1.3
+
+- **Requires Flutter 3.50+** for default release builds (native `--web-content-hash`);
+  older SDKs need `--no-web-content-hash` (legacy, release-local assets).
+- Use Flutter native content hashing with shared immutable assets and per-release dependencies.
+- Stage packaging/deployment and validate dependencies before publishing root pointers.
+- Recover from deleted saved releases on HTTP 404/410, preserving offline and last-good state.
+- Add preview-first dependency-aware cleanup and a standalone server executable entry point.
+
 ## 0.1.2
 
 - Add root `/status.json` ops messages: `loading` on the boot screen, `hold`

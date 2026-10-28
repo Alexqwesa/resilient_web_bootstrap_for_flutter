@@ -6,10 +6,14 @@ export function contentTypeFor(filePath) {
   switch (path.extname(filePath).toLowerCase()) {
     case '.html':
       return 'text/html; charset=utf-8';
+    case '.mjs':
     case '.js':
       return 'application/javascript; charset=utf-8';
     case '.json':
       return 'application/json; charset=utf-8';
+    case '.png': return 'image/png';
+    case '.ttf': return 'font/ttf';
+    case '.otf': return 'font/otf';
     case '.wasm':
       return 'application/wasm';
     case '.gz':
@@ -52,7 +56,7 @@ export function startMutableStaticServer(site) {
     };
     if (isHtml || isLatest || isStatus) {
       headers['Cache-Control'] = 'no-cache, must-revalidate';
-    } else if (relative.startsWith('version/')) {
+    } else if (relative.startsWith('assets/') || (relative.startsWith('version/') && !relative.includes('/canvaskit/'))) {
       headers['Cache-Control'] = 'public, max-age=31536000, immutable';
     }
 

@@ -4,6 +4,7 @@ import 'dart:io';
 import 'package:path/path.dart' as p;
 import 'package:test/test.dart';
 
+
 void main() {
   test('install writes generic managed web files and state', () async {
     final project = await _createFlutterProject();
@@ -33,14 +34,12 @@ void main() {
     final psScript = File(
       p.join(project.path, 'tool', 'build_resilient_web.ps1'),
     ).readAsStringSync();
-    expect(psScript, contains('--hard-update'));
-    expect(psScript, contains('Get-Date -Format "yyyyMMddHHmmss"'));
+    expect(psScript, contains('build @args'));
 
     final shScript = File(
       p.join(project.path, 'tool', 'build_resilient_web.sh'),
     ).readAsStringSync();
-    expect(shScript, contains('--hard-update'));
-    expect(shScript, contains('date +%Y%m%d%H%M%S'));
+    expect(shScript, contains(r'build "$@"'));
   });
 
   test(
@@ -149,7 +148,7 @@ void main() {
             as Map;
     expect(manifest['version'], '202605281200');
     expect(manifest['base'], '/version/202605281200/');
-    expect(manifest.containsKey('assetBase'), isFalse);
+    expect(manifest['assetBase'], '/version/202605281200/');
     expect(DateTime.parse(manifest['createdAt'] as String).isUtc, isTrue);
 
     final files = (manifest['files'] as List).cast<Map>();

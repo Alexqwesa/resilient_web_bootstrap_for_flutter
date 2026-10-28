@@ -129,3 +129,30 @@ test('isTrackedAppEntrypointRequest matches main app bundle urls', () => {
     false,
   );
 });
+
+
+test('entrypoints match Flutter build config exactly, including hashed wasm and runtime paths', () => {
+  const base = 'https://example.test/simops/version/A/';
+  const config = {builds: [
+    {mainJsPath: 'main.abcd1234.dart.js'},
+    {mainWasmPath: 'app.1234abcd.wasm', jsSupportRuntimePath: 'runtime.abcd1234.mjs'},
+  ]};
+  for (const name of ['main.abcd1234.dart.js', 'app.1234abcd.wasm', 'runtime.abcd1234.mjs']) {
+    assert.equal(helpers.isTrackedAppEntrypointRequest(base + name + '?v=1', base, base, config), true);
+  }
+  assert.equal(helpers.isTrackedAppEntrypointRequest(base + 'main.dart.js', base, base, config), false);
+  assert.equal(helpers.isTrackedAppEntrypointRequest('https://other.test/main.abcd1234.dart.js', base, base, config), false);
+});
+
+test('content-hash templates preserve Flutter injection and pass hardcoded entrypoint validation', () => {
+  const fs = require('node:fs');
+  const directory = path.join(__dirname, '..', 'lib', 'templates', 'web');
+  for (const name of ['index.html', 'flutter_bootstrap.js']) {
+    const source = fs.readFileSync(path.join(directory, name), 'utf8');
+    assert.equal(source.includes('main.dart.js'), false);
+    assert.equal(source.includes('loadEntrypoint'), false);
+  }
+  const bootstrap = fs.readFileSync(path.join(directory, 'flutter_bootstrap.js'), 'utf8');
+  assert.ok(bootstrap.includes('{{flutter_js}}'));
+  assert.ok(bootstrap.includes('{{flutter_build_config}}'));
+});

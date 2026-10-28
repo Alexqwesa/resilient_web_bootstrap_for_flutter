@@ -11,6 +11,12 @@ final class BootstrapConfig {
     required this.versionPath,
     required this.hardUpdate,
     required this.cleanupPage,
+    this.basePath = '/',
+    this.cleanupEnabled = true,
+    this.keepDays = 90,
+    this.keepReleases = 3,
+    this.assetGraceDays = 90,
+    this.collectAssets = true,
   });
 
   factory BootstrapConfig.defaults() => const BootstrapConfig(
@@ -22,6 +28,16 @@ final class BootstrapConfig {
     hardUpdate: false,
     cleanupPage: 'cleanup_cache.html',
   );
+
+  final String basePath;
+  final bool cleanupEnabled;
+  final int keepDays;
+  final int keepReleases;
+  final int assetGraceDays;
+  final bool collectAssets;
+
+  String get releaseUrlRoot =>
+      '${basePath.replaceAll(RegExp(r"/+$"), "")}/${versionPath.replaceAll(RegExp(r"^/+|/+$"), "")}';
 
   final String title;
   final String description;
@@ -39,8 +55,20 @@ final class BootstrapConfig {
     String? versionPath,
     bool? hardUpdate,
     String? cleanupPage,
+    String? basePath,
+    bool? cleanupEnabled,
+    int? keepDays,
+    int? keepReleases,
+    int? assetGraceDays,
+    bool? collectAssets,
   }) {
     return BootstrapConfig(
+      basePath: basePath ?? this.basePath,
+      cleanupEnabled: cleanupEnabled ?? this.cleanupEnabled,
+      keepDays: keepDays ?? this.keepDays,
+      keepReleases: keepReleases ?? this.keepReleases,
+      assetGraceDays: assetGraceDays ?? this.assetGraceDays,
+      collectAssets: collectAssets ?? this.collectAssets,
       title: title ?? this.title,
       description: description ?? this.description,
       loaderLabel: loaderLabel ?? this.loaderLabel,
@@ -67,7 +95,16 @@ final class BootstrapConfig {
 
     final app = document['app'];
     final bootstrap = document['bootstrap'];
+    final cleanup = document['cleanup'];
     return defaults.copyWith(
+      basePath: _readString(bootstrap, 'basePath') ?? defaults.basePath,
+      cleanupEnabled: _readBool(cleanup, 'enabled') ?? defaults.cleanupEnabled,
+      keepDays: _readInt(cleanup, 'keepDays') ?? defaults.keepDays,
+      keepReleases: _readInt(cleanup, 'keepReleases') ?? defaults.keepReleases,
+      assetGraceDays:
+          _readInt(cleanup, 'assetGraceDays') ?? defaults.assetGraceDays,
+      collectAssets:
+          _readBool(cleanup, 'collectAssets') ?? defaults.collectAssets,
       title: _readString(app, 'title') ?? defaults.title,
       description: _readString(app, 'description') ?? defaults.description,
       loaderLabel: _readString(app, 'loaderLabel') ?? defaults.loaderLabel,
@@ -90,9 +127,17 @@ app:
   tokenMessageType: ${_quoteYaml(tokenMessageType)}
 
 bootstrap:
+  basePath: ${_quoteYaml(basePath)}
   versionPath: ${_quoteYaml(versionPath)}
   hardUpdate: $hardUpdate
   cleanupPage: ${_quoteYaml(cleanupPage)}
+
+cleanup:
+  enabled: $cleanupEnabled
+  keepDays: $keepDays
+  keepReleases: $keepReleases
+  assetGraceDays: $assetGraceDays
+  collectAssets: $collectAssets
 ''';
   }
 }
@@ -129,4 +174,13 @@ bool? _readBool(Object? parent, String key) {
 String _quoteYaml(String value) {
   final escaped = value.replaceAll(r'\', r'\\').replaceAll('"', r'\"');
   return '"$escaped"';
+}
+
+int? _readInt(Object? parent, String key) {
+  if (parent is! YamlMap || parent[key] == null) return null;
+  final value = int.tryParse(parent[key].toString());
+  if (value == null || value < 0) {
+    throw FormatException('Expected nonnegative integer for cleanup.$key');
+  }
+  return value;
 }
