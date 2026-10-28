@@ -2623,3 +2623,159 @@ test('same pinned build reuses pinned persistent cache across helper reloads', a
     harness.restore();
   }
 });
+
+test('downloadAndGunzipBootResource stores and reuses decoded bytes', async () => {
+  const zlib = require('node:zlib');
+  const originalWindow = global.window;
+  const originalCaches = global.caches;
+  const originalDecompressionStream = global.DecompressionStream;
+  const cacheStore = new Map();
+  const fetchCalls = [];
+  const plainBytes = Uint8Array.from(Buffer.from('console.log("boot");', 'utf8'));
+  const gzipBytes = Uint8Array.from(zlib.gzipSync(Buffer.from(plainBytes)));
+  const plainSha256 = sha256Hex(plainBytes);
+  const gzipSha256 = sha256Hex(gzipBytes);
+
+  function makeHeaders(entries) {
+    const map = new Map(Object.entries(entries || {}));
+    return {
+      get(name) {
+        const target = String(name).toLowerCase();
+        for (const [key, value] of map.entries()) {
+          if (String(key).toLowerCase() === target) {
+            return value;
+          }
+        }
+        return null;
+      },
+    };
+  }
+
+  if (typeof global.DecompressionStream === 'undefined') {
+    const { Transform } = require('node:stream');
+    global.DecompressionStream = class DecompressionStream {
+      constructor(format) {
+        if (format !== 'gzip') {
+          throw new Error(`Unsupported format: ${format}`);
+        }
+        const gunzip = zlib.createGunzip();
+        this.readable = Transform.toWeb(gunzip).readable;
+        this.writable = Transform.toWeb(gunzip).writable;
+      }
+    };
+  }
+
+  try {
+    global.window = {
+      location: { href: 'https://example.test/' },
+      fetch: async function fetchMock(url) {
+        fetchCalls.push(String(url));
+        let done = false;
+        return {
+          status: 200,
+          headers: makeHeaders({
+            'Content-Type': 'application/gzip',
+          }),
+          body: {
+            getReader() {
+              return {
+                async cancel() {},
+                async read() {
+                  if (done) {
+                    return { done: true, value: undefined };
+                  }
+                  done = true;
+                  return { done: false, value: gzipBytes };
+                },
+              };
+            },
+          },
+          async arrayBuffer() {
+            return gzipBytes.buffer.slice(
+              gzipBytes.byteOffset,
+              gzipBytes.byteOffset + gzipBytes.byteLength,
+            );
+          },
+        };
+      },
+    };
+    global.caches = {
+      async keys() {
+        return Array.from(cacheStore.keys());
+      },
+      async open(name) {
+        if (!cacheStore.has(name)) {
+          cacheStore.set(name, new Map());
+        }
+        const bucket = cacheStore.get(name);
+        return {
+          async match(requestUrl) {
+            return bucket.get(String(requestUrl)) || null;
+          },
+          async put(requestUrl, response) {
+            bucket.set(String(requestUrl), response);
+          },
+          async delete(requestUrl) {
+            return bucket.delete(String(requestUrl));
+          },
+        };
+      },
+    };
+
+    let helpers = await loadHelpers();
+    assert.equal(
+      helpers.getBootDecodedCacheKey('https://example.test/version/1/flutter_bootstrap.js.gz'),
+      'https://example.test/version/1/flutter_bootstrap.js',
+    );
+
+    const first = await helpers.downloadAndGunzipBootResource(
+      'https://example.test/version/1/flutter_bootstrap.js.gz',
+      { cache: 'force-cache' },
+      {
+        label: 'flutter_bootstrap.js',
+        totalBytesHint: gzipBytes.byteLength,
+        expectedSha256: gzipSha256,
+        decodedUrl: 'https://example.test/version/1/flutter_bootstrap.js',
+        decodedSize: plainBytes.byteLength,
+        decodedSha256: plainSha256,
+        decodedContentType: 'application/javascript',
+        idleMs: 1000,
+        maxAttempts: 5,
+        retryDelayMs: 0,
+        maxRetryDelayMs: 0,
+      },
+    );
+
+    assert.equal(first.fromDecodedCache, false);
+    assert.deepEqual(Array.from(first.bytes), Array.from(plainBytes));
+    assert.equal(fetchCalls.length, 1);
+
+    delete require.cache[require.resolve(bootDownloadHelpersTemplatePath)];
+    helpers = await loadHelpers();
+    const second = await helpers.downloadAndGunzipBootResource(
+      'https://example.test/version/1/flutter_bootstrap.js.gz',
+      { cache: 'force-cache' },
+      {
+        label: 'flutter_bootstrap.js',
+        totalBytesHint: gzipBytes.byteLength,
+        expectedSha256: gzipSha256,
+        decodedUrl: 'https://example.test/version/1/flutter_bootstrap.js',
+        decodedSize: plainBytes.byteLength,
+        decodedSha256: plainSha256,
+        decodedContentType: 'application/javascript',
+        idleMs: 1000,
+        maxAttempts: 5,
+        retryDelayMs: 0,
+        maxRetryDelayMs: 0,
+      },
+    );
+
+    assert.equal(second.fromDecodedCache, true);
+    assert.deepEqual(Array.from(second.bytes), Array.from(plainBytes));
+    assert.equal(fetchCalls.length, 1);
+  } finally {
+    global.window = originalWindow;
+    global.caches = originalCaches;
+    global.DecompressionStream = originalDecompressionStream;
+  }
+});

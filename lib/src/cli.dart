@@ -106,7 +106,8 @@ final class ResilientBootstrapCli {
         ..addFlag(
           'force',
           negatable: false,
-          help: 'Delete the output directory first if it already exists.',
+          help:
+              'Update root files in an existing output, preserving immutable releases.',
         ),
     );
     parser.addCommand('doctor', ArgParser());
@@ -190,6 +191,7 @@ final class InstallCommand extends ProjectCommand {
     webDir.createSync(recursive: true);
 
     final force = results['force'] == true;
+
     final previousState = loadState();
     final nextState = Map<String, String>.from(previousState);
     final backupDir = Directory(
@@ -368,7 +370,9 @@ final class DoctorCommand extends ProjectCommand {
     }
 
     stdout.writeln('Server requirements:');
-    stdout.writeln('- /index.html, /latest.json, /status.json: no-cache or no-store');
+    stdout.writeln(
+      '- /index.html, /latest.json, /status.json: no-cache or no-store',
+    );
     stdout.writeln('- /version/: immutable caching and byte-range support');
     stdout.writeln(
       '- Do not gzip already-created .gz files at the server layer',
@@ -411,6 +415,11 @@ final class PackageCommand extends ProjectCommand {
     );
     final force = results['force'] == true;
 
+    if (!RegExp(r'^[A-Za-z0-9][A-Za-z0-9_-]*$').hasMatch(version)) {
+      throw ArgumentError(
+        'Version must contain only letters, digits, underscores or hyphens.',
+      );
+    }
     if (!buildDir.existsSync()) {
       throw StateError('Build directory does not exist: ${buildDir.path}');
     }
@@ -420,10 +429,14 @@ final class PackageCommand extends ProjectCommand {
     if (outRoot.existsSync()) {
       if (!force) {
         throw StateError(
-          '${outRoot.path} already exists. Re-run with --force to replace it.',
+          '${outRoot.path} already exists. Re-run with --force to update root files.',
         );
       }
-      outRoot.deleteSync(recursive: true);
+    }
+    if (versionDir.existsSync()) {
+      throw StateError(
+        'Version $version already exists. Choose a new immutable version id.',
+      );
     }
 
     versionDir.createSync(recursive: true);
@@ -438,11 +451,11 @@ final class PackageCommand extends ProjectCommand {
       versionDir: versionDir,
       hardUpdate: results['hard-update'] == true || config.hardUpdate,
     );
+    manifest['createdAt'] = DateTime.now().toUtc().toIso8601String();
 
     _writeManifest(manifest, File(p.join(outRoot.path, 'latest.json')));
     _writeManifest(manifest, File(p.join(versionDir.path, 'latest.json')));
     await _writeIndexShell(config, version, outRoot, versionDir);
-
     stdout.writeln('Packaged hardened Flutter web app.');
     stdout.writeln('Output: ${outRoot.path}');
     stdout.writeln('Versioned app: ${versionDir.path}');

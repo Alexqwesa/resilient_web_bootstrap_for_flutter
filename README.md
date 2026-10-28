@@ -122,6 +122,10 @@ dart run resilient_web_bootstrap_for_flutter:resilient_bootstrap --project . pac
 The default packaged output is `build/web_hardened`. Deploy that directory, not the raw
 `build/web` directory.
 
+Each release includes its own complete `assets/` directory. `package --force`
+updates root files while preserving existing releases; duplicate version IDs
+are rejected. Packaging does not automatically clean up old releases.
+
 Promotion should copy `version/<build>/` first and replace root `index.html` and
 `latest.json` last. Configure nginx so root `index.html`, `/`, `latest.json`, and
 `status.json` are not cached by nginx or the browser; immutable caching should

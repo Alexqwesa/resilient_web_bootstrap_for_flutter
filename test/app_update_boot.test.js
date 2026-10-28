@@ -482,6 +482,22 @@ _flutter.loader.load({
         resourceLength: 4,
       };
     },
+    async downloadAndGunzipBootResource(url) {
+      downloadCalls.push(url);
+      return {
+        bytes: new Uint8Array(
+          bootstrapSource.buffer.slice(
+            bootstrapSource.byteOffset,
+            bootstrapSource.byteOffset + bootstrapSource.byteLength,
+          ),
+        ),
+        contentType: 'application/javascript',
+        totalBytes: bootstrapSource.byteLength,
+        resourceLength: bootstrapSource.byteLength,
+        decoded: true,
+        fromDecodedCache: false,
+      };
+    },
     async readPersistentBootDownload(url) {
       const entry = bootCacheState && bootCacheState.get(String(url));
       if (!entry) {

@@ -43,6 +43,66 @@ void main() {
     expect(shScript, contains('date +%Y%m%d%H%M%S'));
   });
 
+  test(
+    'package preserves independent releases and rejects duplicate version IDs',
+    () async {
+      final project = await _createFlutterProject();
+      addTearDown(() => project.deleteSync(recursive: true));
+      _writeBuildOutput(project);
+      final image = File(
+        p.join(project.path, 'build', 'web', 'assets', 'image.png'),
+      );
+      image.writeAsStringSync('image bytes');
+      final out = Directory(p.join(project.path, 'build', 'web_hardened'));
+      for (final id in ['A', 'B', 'C']) {
+        final result = await _runCli(project, [
+          'package',
+          '--version',
+          id,
+          '--force',
+        ]);
+        expect(result.exitCode, 0, reason: result.stderr.toString());
+        final manifest =
+            jsonDecode(File(p.join(out.path, 'latest.json')).readAsStringSync())
+                as Map;
+        expect(manifest['version'], id);
+      }
+      expect(
+        File(
+          p.join(out.path, 'version', 'A', 'assets', 'image.png'),
+        ).existsSync(),
+        isTrue,
+      );
+      expect(
+        File(
+          p.join(out.path, 'version', 'B', 'assets', 'image.png'),
+        ).existsSync(),
+        isTrue,
+      );
+      expect(
+        File(
+          p.join(out.path, 'version', 'C', 'assets', 'image.png'),
+        ).existsSync(),
+        isTrue,
+      );
+      expect(
+        File(p.join(out.path, 'version', 'A', 'main.dart.js')).existsSync(),
+        isTrue,
+      );
+      final duplicate = await _runCli(project, [
+        'package',
+        '--version',
+        'A',
+        '--force',
+      ]);
+      expect(duplicate.exitCode, isNot(0));
+      final manifest =
+          jsonDecode(File(p.join(out.path, 'latest.json')).readAsStringSync())
+              as Map;
+      expect(manifest['version'], 'C');
+    },
+  );
+
   test('package creates versioned output and manifest hashes', () async {
     final project = await _createFlutterProject();
     addTearDown(() => project.deleteSync(recursive: true));
@@ -89,6 +149,8 @@ void main() {
             as Map;
     expect(manifest['version'], '202605281200');
     expect(manifest['base'], '/version/202605281200/');
+    expect(manifest.containsKey('assetBase'), isFalse);
+    expect(DateTime.parse(manifest['createdAt'] as String).isUtc, isTrue);
 
     final files = (manifest['files'] as List).cast<Map>();
     final main = files.singleWhere((file) => file['path'] == 'main.dart.js');
@@ -163,9 +225,11 @@ Future<ProcessResult> _runCli(Directory project, List<String> args) {
 void _writeBuildOutput(Directory project) {
   final root = Directory(p.join(project.path, 'build', 'web'))
     ..createSync(recursive: true);
-  File(
-    p.join(root.path, 'flutter_bootstrap.js'),
-  ).writeAsStringSync('console.log("boot");');
+  File(p.join(root.path, 'flutter_bootstrap.js')).writeAsStringSync('''
+const BOOT_MANIFEST = window.__FLUTTER_MANIFEST__;
+const BUILD_BASE = '/';
+const ENGINE_CONFIG = {assetBase: BUILD_BASE,};
+''');
   File(
     p.join(root.path, 'main.dart.js'),
   ).writeAsStringSync('console.log("main");');
@@ -176,9 +240,9 @@ void _writeBuildOutput(Directory project) {
   File(p.join(root.path, 'sitemap.xml')).writeAsStringSync(
     '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9"></urlset>',
   );
-  File(p.join(root.path, 'status.json')).writeAsStringSync(
-    '{"loading":"","hold":"","after":""}\n',
-  );
+  File(
+    p.join(root.path, 'status.json'),
+  ).writeAsStringSync('{"loading":"","hold":"","after":""}\n');
 
   final assets = Directory(p.join(root.path, 'assets'))
     ..createSync(recursive: true);

@@ -3,6 +3,8 @@
 - Add root `/status.json` ops messages: `loading` on the boot screen, `hold`
   to pause boot with a 20s recheck, and `after` on the bottom notice bar
   (reuses the background-update bar; a real update replaces the notice).
+- Persist decoded (unzipped) boot payloads in Cache Storage after the first
+  gunzip so later startups can skip decompression.
 
 ## 0.1.1
 
