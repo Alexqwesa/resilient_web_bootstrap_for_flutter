@@ -9,3 +9,10 @@ test/e2e_chrome/*.log
 test/e2e_chrome/package-lock.json
 **/*.log
 .idea/
+
+# .pubignore replaces .gitignore for pub, so repeat local build/tool output here.
+.dart_tool/
+build/
+pubspec.lock
+*.exe
+.env*

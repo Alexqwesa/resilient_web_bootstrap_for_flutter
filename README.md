@@ -222,6 +222,29 @@ own manifest. Root startup recovers from a deleted remembered release only on a
 proven HTTP 404/410, with a bounded retry; temporary failures retain cached state.
 A release becomes last-good only after Flutter paints its first frame.
 
+### What this package does not try to do
+
+The goal is to keep deployment simple and reliable without replacing Flutter's
+built-in asset handling.
+
+- **No custom asset loading or renaming.** Flutter already handles asset names,
+  hashes, and loading. We reuse its system rather than build another one.
+- **No complex deduplication.** Files with the same Flutter-generated path can be
+  shared across releases. We don't compare entire builds or merge identical files
+  with different names.
+- **No asset database.** Each release records which assets it needs, so cleanup
+  works without a database.
+- **No additional service worker.** The existing bootstrap and browser caching
+  mechanisms handle downloads and recovery.
+- **No built-in remote deployment.** Deploy to a local folder or mounted network
+  share. Use your preferred tools for SSH, S3, or other remote destinations.
+- **No CanvasKit sharing yet.** CanvasKit files remain separate for each release
+  to avoid caching problems.
+
+In short: Flutter handles how assets are named and loaded. This package handles
+safe deployment, sharing unchanged files, cleaning up old releases, and recovering
+from stale browser caches.
+
 ## Deployment And Retention
 
 Packaging stages a new release before publishing root pointers and refuses
