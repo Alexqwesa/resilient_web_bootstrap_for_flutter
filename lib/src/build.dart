@@ -4,7 +4,7 @@ import 'dart:io';
 /// Preserve argument boundaries, including paths and dart-defines with spaces.
 Future<void> buildWeb(Directory project, List<String> arguments) async {
   final flutterArgs = <String>[];
-  final packageArgs = <String>['--force'];
+  final packageArgs = <String>[];
   var mode = '--release';
   bool? hashing;
   for (var i = 0; i < arguments.length; i++) {
@@ -13,7 +13,12 @@ Future<void> buildWeb(Directory project, List<String> arguments) async {
       mode = arg;
     } else if (arg == '--web-content-hash' || arg == '--no-web-content-hash') {
       hashing = arg == '--web-content-hash';
-    } else if (['--hard-update', '--cleanup', '--no-cleanup'].contains(arg)) {
+    } else if ([
+      '--hard-update',
+      '--force',
+      '--cleanup',
+      '--no-cleanup',
+    ].contains(arg)) {
       packageArgs.add(arg);
     } else if (['--version', '--out', '--build-dir'].contains(arg)) {
       if (++i >= arguments.length) throw ArgumentError('$arg requires a value');

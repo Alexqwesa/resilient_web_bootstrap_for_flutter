@@ -915,6 +915,22 @@ test('app_update starts sideload and downloads versioned gz files after first fr
   assert.equal(JSON.parse(harness.context.localStorage.getItem('flutter.nextManifest')).version, '202605141111');
 });
 
+test('app_update update check waits for the release delay; zero checks right away', async () => {
+  const waiting = makeHarness({
+    latestManifests: [makeManifest('202605141110', ''), makeManifest('202605141111', 'next/')],
+  });
+  await waitFor(() => waiting.context.__RUN_APP_DONE === true);
+  await new Promise(resolve => setTimeout(resolve, 20));
+  assert.equal(waiting.downloadCalls.some(url => url.includes('/202605141111/')), false);
+
+  const running = makeManifest('202605141110', '');
+  running.updateCheckDelaySeconds = 0;
+  const immediate = makeHarness({
+    latestManifests: [running, makeManifest('202605141111', 'next/')],
+  });
+  await waitFor(() => immediate.downloadCalls.some(url => url.includes('/202605141111/')));
+});
+
 test('app_update shows status.json after message on the bottom bar after first frame', async () => {
   const harness = makeHarness({
     latestManifests: [makeManifest('202605141110', '')],

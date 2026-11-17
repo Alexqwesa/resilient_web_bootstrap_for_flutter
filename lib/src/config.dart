@@ -17,6 +17,7 @@ final class BootstrapConfig {
     this.keepReleases = 3,
     this.assetGraceDays = 90,
     this.collectAssets = true,
+    this.updateCheckDelaySeconds = 5,
   });
 
   factory BootstrapConfig.defaults() => const BootstrapConfig(
@@ -35,6 +36,9 @@ final class BootstrapConfig {
   final int keepReleases;
   final int assetGraceDays;
   final bool collectAssets;
+
+  /// Seconds after startup before a running tab checks for a new release.
+  final int updateCheckDelaySeconds;
 
   String get releaseUrlRoot =>
       '${basePath.replaceAll(RegExp(r"/+$"), "")}/${versionPath.replaceAll(RegExp(r"^/+|/+$"), "")}';
@@ -61,6 +65,7 @@ final class BootstrapConfig {
     int? keepReleases,
     int? assetGraceDays,
     bool? collectAssets,
+    int? updateCheckDelaySeconds,
   }) {
     return BootstrapConfig(
       basePath: basePath ?? this.basePath,
@@ -69,6 +74,8 @@ final class BootstrapConfig {
       keepReleases: keepReleases ?? this.keepReleases,
       assetGraceDays: assetGraceDays ?? this.assetGraceDays,
       collectAssets: collectAssets ?? this.collectAssets,
+      updateCheckDelaySeconds:
+          updateCheckDelaySeconds ?? this.updateCheckDelaySeconds,
       title: title ?? this.title,
       description: description ?? this.description,
       loaderLabel: loaderLabel ?? this.loaderLabel,
@@ -99,10 +106,15 @@ final class BootstrapConfig {
     return defaults.copyWith(
       basePath: _readString(bootstrap, 'basePath') ?? defaults.basePath,
       cleanupEnabled: _readBool(cleanup, 'enabled') ?? defaults.cleanupEnabled,
-      keepDays: _readInt(cleanup, 'keepDays') ?? defaults.keepDays,
-      keepReleases: _readInt(cleanup, 'keepReleases') ?? defaults.keepReleases,
+      keepDays: _readInt(cleanup, 'cleanup', 'keepDays') ?? defaults.keepDays,
+      keepReleases:
+          _readInt(cleanup, 'cleanup', 'keepReleases') ?? defaults.keepReleases,
       assetGraceDays:
-          _readInt(cleanup, 'assetGraceDays') ?? defaults.assetGraceDays,
+          _readInt(cleanup, 'cleanup', 'assetGraceDays') ??
+          defaults.assetGraceDays,
+      updateCheckDelaySeconds:
+          _readInt(bootstrap, 'bootstrap', 'updateCheckDelaySeconds') ??
+          defaults.updateCheckDelaySeconds,
       collectAssets:
           _readBool(cleanup, 'collectAssets') ?? defaults.collectAssets,
       title: _readString(app, 'title') ?? defaults.title,
@@ -130,6 +142,7 @@ bootstrap:
   basePath: ${_quoteYaml(basePath)}
   versionPath: ${_quoteYaml(versionPath)}
   hardUpdate: $hardUpdate
+  updateCheckDelaySeconds: $updateCheckDelaySeconds
   cleanupPage: ${_quoteYaml(cleanupPage)}
 
 cleanup:
@@ -176,11 +189,11 @@ String _quoteYaml(String value) {
   return '"$escaped"';
 }
 
-int? _readInt(Object? parent, String key) {
+int? _readInt(Object? parent, String section, String key) {
   if (parent is! YamlMap || parent[key] == null) return null;
   final value = int.tryParse(parent[key].toString());
   if (value == null || value < 0) {
-    throw FormatException('Expected nonnegative integer for cleanup.$key');
+    throw FormatException('Expected nonnegative integer for $section.$key');
   }
   return value;
 }

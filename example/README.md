@@ -30,6 +30,7 @@ app:
 bootstrap:
   versionPath: "/version"
   hardUpdate: false
+  updateCheckDelaySeconds: 5
   cleanupPage: "cleanup_cache.html"
 ```
 
@@ -40,7 +41,7 @@ loader label.
 
 ```bash
 flutter build web --release
-dart run resilient_web_bootstrap_for_flutter:resilient_bootstrap --project . package --force
+dart run resilient_web_bootstrap_for_flutter:resilient_bootstrap --project . package
 ```
 
 Deploy `build/web_hardened`, not the raw `build/web` directory. The packaged

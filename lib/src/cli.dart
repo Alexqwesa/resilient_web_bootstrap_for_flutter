@@ -126,13 +126,13 @@ final class ResilientBootstrapCli {
         ..addFlag(
           'hard-update',
           negatable: false,
-          help: 'Set hardUpdate=true in latest.json.',
+          help:
+              'Switch users to this release immediately instead of in the background.',
         )
         ..addFlag(
           'force',
           negatable: false,
-          help:
-              'Update root files in an existing output, preserving immutable releases.',
+          help: 'Deprecated; has no effect.',
         ),
     );
     parser.addCommand('build', ArgParser.allowAnything());
@@ -447,6 +447,9 @@ final class PackageCommand extends ProjectCommand {
 
   Future<void> run() async {
     ensureFlutterProject();
+    if (results['force'] == true) {
+      stderr.writeln('package --force is deprecated and has no effect.');
+    }
     final config = loadConfig();
     final version =
         (results['version'] as String?) ?? _timestamp(DateTime.now());
@@ -459,7 +462,6 @@ final class PackageCommand extends ProjectCommand {
     final versionDir = Directory(
       p.join(outRoot.path, versionRootName, version),
     );
-    final force = results['force'] == true;
 
     if (!RegExp(r'^[A-Za-z0-9][A-Za-z0-9_-]*$').hasMatch(version)) {
       throw ArgumentError(
@@ -471,13 +473,6 @@ final class PackageCommand extends ProjectCommand {
     }
     if (_samePath(buildDir, outRoot)) {
       throw StateError('Use a different --out directory than --build-dir.');
-    }
-    if (outRoot.existsSync()) {
-      if (!force) {
-        throw StateError(
-          '${outRoot.path} already exists. Re-run with --force to update root files.',
-        );
-      }
     }
     if (versionDir.existsSync()) {
       throw StateError(
@@ -687,6 +682,7 @@ final class PackageCommand extends ProjectCommand {
     if (hardUpdate) {
       manifest['hardUpdate'] = true;
     }
+    manifest['updateCheckDelaySeconds'] = config.updateCheckDelaySeconds;
     return manifest;
   }
 

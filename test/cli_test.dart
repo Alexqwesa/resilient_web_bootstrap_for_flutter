@@ -4,7 +4,6 @@ import 'dart:io';
 import 'package:path/path.dart' as p;
 import 'package:test/test.dart';
 
-
 void main() {
   test('install writes generic managed web files and state', () async {
     final project = await _createFlutterProject();
@@ -54,12 +53,7 @@ void main() {
       image.writeAsStringSync('image bytes');
       final out = Directory(p.join(project.path, 'build', 'web_hardened'));
       for (final id in ['A', 'B', 'C']) {
-        final result = await _runCli(project, [
-          'package',
-          '--version',
-          id,
-          '--force',
-        ]);
+        final result = await _runCli(project, ['package', '--version', id]);
         expect(result.exitCode, 0, reason: result.stderr.toString());
         final manifest =
             jsonDecode(File(p.join(out.path, 'latest.json')).readAsStringSync())
@@ -88,12 +82,7 @@ void main() {
         File(p.join(out.path, 'version', 'A', 'main.dart.js')).existsSync(),
         isTrue,
       );
-      final duplicate = await _runCli(project, [
-        'package',
-        '--version',
-        'A',
-        '--force',
-      ]);
+      final duplicate = await _runCli(project, ['package', '--version', 'A']);
       expect(duplicate.exitCode, isNot(0));
       final manifest =
           jsonDecode(File(p.join(out.path, 'latest.json')).readAsStringSync())
@@ -110,12 +99,7 @@ void main() {
     expect(result.exitCode, 0, reason: result.stderr.toString());
 
     _writeBuildOutput(project);
-    result = await _runCli(project, [
-      'package',
-      '--version',
-      '202605281200',
-      '--force',
-    ]);
+    result = await _runCli(project, ['package', '--version', '202605281200']);
     expect(result.exitCode, 0, reason: result.stderr.toString());
 
     final out = Directory(p.join(project.path, 'build', 'web_hardened'));
@@ -190,6 +174,34 @@ void main() {
 
       expect(manifest['version'], matches(RegExp(r'^\d{14}$')));
       expect(manifest['hardUpdate'], isTrue);
+    },
+  );
+
+  test(
+    'deprecated package --force has no effect; update check delay is configurable',
+    () async {
+      final project = await _createFlutterProject();
+      addTearDown(() => project.deleteSync(recursive: true));
+      final out = p.join(project.path, 'build', 'web_hardened');
+      Map readLatest() =>
+          jsonDecode(File(p.join(out, 'latest.json')).readAsStringSync())
+              as Map;
+
+      _writeBuildOutput(project);
+      var result = await _runCli(project, ['package', '--version', 'A']);
+      expect(result.exitCode, 0, reason: result.stderr.toString());
+      expect(readLatest()['hardUpdate'], isNull);
+      expect(readLatest()['updateCheckDelaySeconds'], 5);
+
+      File(
+        p.join(project.path, 'resilient_bootstrap.yaml'),
+      ).writeAsStringSync('bootstrap:\n  updateCheckDelaySeconds: 0\n');
+      result = await _runCli(project, ['package', '--version', 'B', '--force']);
+      expect(result.exitCode, 0, reason: result.stderr.toString());
+      expect(result.stderr, contains('deprecated'));
+      expect(readLatest()['version'], 'B');
+      expect(readLatest()['hardUpdate'], isNull);
+      expect(readLatest()['updateCheckDelaySeconds'], 0);
     },
   );
 }

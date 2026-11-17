@@ -6,6 +6,11 @@
 - Stage packaging/deployment and validate dependencies before publishing root pointers.
 - Recover from deleted saved releases on HTTP 404/410, preserving offline and last-good state.
 - Add preview-first dependency-aware cleanup and a standalone server executable entry point.
+- **Deprecated:** `package --force` no longer deletes the output folder and has no
+  effect. `package` always adds the release to an existing output folder, keeping
+  older releases and shared assets. Remove `--force` from your scripts.
+- Add `bootstrap.updateCheckDelaySeconds` (default 5): how long an open tab waits
+  after startup before checking for a new release.
 
 ## 0.1.2
 

@@ -53,7 +53,6 @@ void main() {
         'package',
         '--version',
         version,
-        '--force',
       ]);
       expect(result.exitCode, 0, reason: result.stderr);
 
@@ -230,7 +229,6 @@ void main() {
         '--version',
         'hardupdate1',
         '--hard-update',
-        '--force',
       ]);
       expect(result.exitCode, 0, reason: result.stderr);
 

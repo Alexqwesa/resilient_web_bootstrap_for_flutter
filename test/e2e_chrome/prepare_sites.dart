@@ -35,7 +35,6 @@ Future<void> main(List<String> args) async {
       'before_apply',
       '--out',
       beforeDir.path,
-      '--force',
     ]);
 
     _writeBuildOutput(project, versionId: 'after_apply');
@@ -46,7 +45,6 @@ Future<void> main(List<String> args) async {
       '--hard-update',
       '--out',
       stagedAfter.path,
-      '--force',
     ]);
 
     _copyDirectory(beforeDir, afterDir);

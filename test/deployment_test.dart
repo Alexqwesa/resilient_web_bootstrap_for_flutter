@@ -45,7 +45,6 @@ void main() {
       'package',
       '--version',
       version,
-      '--force',
     ]);
     expect(exitCode, succeeds ? 0 : 1);
     exitCode = 0;
